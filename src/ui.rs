@@ -127,9 +127,9 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                             .map(|m| m.inputs[0].value())
                             .unwrap_or("127.0.0.1");
                         let http_port = actions
-                            .git_modal
+                            .http_modal
                             .as_ref()
-                            .and_then(|m| m.inputs.get(2))
+                            .and_then(|m| m.inputs.get(0))
                             .map(|m| m.value())
                             .unwrap_or("8080");
 
@@ -754,7 +754,9 @@ where
                                         app.config.git_daemon_address =
                                             modal.inputs[0].value().to_string();
                                         app.config.git_branch = modal.inputs[1].value().to_string();
-                                        if let Ok(port) = modal.inputs[2].value().parse::<u16>() {
+                                    }
+                                    if let Some(modal) = &owned_actions.http_modal {
+                                        if let Ok(port) = modal.inputs[0].value().parse::<u16>() {
                                             app.config.git_http_server_port = port;
                                         }
                                     }
