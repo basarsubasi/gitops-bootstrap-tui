@@ -37,13 +37,15 @@ When you generate a cluster using the TUI, it creates the following standard Kus
 
 - **Interactive Wizard**: A guided wizard to gather essential bootstrap configuration (Base Directory, Cluster Name, Git URL, etc.).
 - **Component Explorer**: A navigable tree view to explore, enable, and disable Helm releases and GitOps components before generation.
+- **Component Rules Engine**: Natively enforces dependencies (`requires`) and mutual exclusivity (`conflicts`) between components directly in the UI, configured via a central `rules.yaml` in your templates repository.
 - **Value Customization**: You can customize the default helm chart values before generating the templates.
-- **Deduplicated GitOps Generation**: Dynamically constructs isolated Kustomize trees and automatically prevents duplicate HelmRepository declarations.
+- **Monolithic GitOps Generation**: Dynamically constructs a flat Kustomize tree, avoiding complex dependency loops. 
+- **Global Deduplication**: Automatically extracts and globalizes Helm namespaces and `HelmRepository` declarations to absolutely prevent Kustomize resource ID collisions.
 - **Post-Generation Actions**:
-  - Automatically initialize a local Git repository, natively pull existing commits (resolving conflicts by preferring remote versions), and commit the bootstrapped structure.
-  - Seamlessly push generated manifests to any standard remote Git provider (GitHub, GitLab, Gitea, Bitbucket) using SSH keys or HTTP tokens.
+  - Automatically initialize a local Git repository, and commit the bootstrapped structure.
+  - Seamlessly force-push generated manifests to any standard remote Git provider (GitHub, GitLab, Gitea, Bitbucket) using SSH keys or HTTP tokens.
   - Bootstrap Flux CD securely using `flux bootstrap git` for provider-agnostic compatibility.
-- **Live Interactive Execution Engine**: Stream complex CLI executions (like `flux bootstrap`) right into the TUI. We natively strip ANSI escape codes and parse interactive `[y/N]` prompts so you can type answers without breaking the UI context!
+- **Live Interactive Execution Engine**: Stream complex CLI executions (like `flux bootstrap`) right into the TUI. We natively strip ANSI escape codes, handle log scrollback, and parse interactive `[y/N]` prompts so you can type answers without breaking the UI context!
 - **Persistent Configuration**: User configurations and inputs are saved automatically to `~/.config/gitops-bootstrap-tui/config.json` and restored on the next run.
 
 ## Prerequisites
