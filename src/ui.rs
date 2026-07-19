@@ -110,28 +110,32 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                     "\x1b[1;32m✓ Successfully generated GitOps directory at {}\x1b[0m",
                     expanded_gitops_path
                 );
-
                 if let Some(actions) = app.pending_actions {
-                    if actions.init_git || actions.git_http_server {
-                        println!("\x1b[1;36m[2/3] Initializing Git Repository...\x1b[0m");
+                    if actions.init_git {
+                        println!("\x1b[1;36m[2/3] Initializing Git Repository & Pushing to Remote...\x1b[0m");
                         let target_dir = std::path::Path::new(&expanded_gitops_path);
 
+                        let git_url = actions
+                            .flux_modal
+                            .as_ref()
+                            .map(|m| m.inputs[0].value())
+                            .unwrap_or("git@github.com:my-org/my-gitops-repo.git");
                         let initial_branch = actions
-                            .git_modal
+                            .flux_modal
                             .as_ref()
                             .map(|m| m.inputs[1].value())
                             .unwrap_or("main");
-                        let listen_addr = actions
-                            .git_modal
+                        let ssh_key = actions
+                            .flux_modal
                             .as_ref()
-                            .map(|m| m.inputs[0].value())
-                            .unwrap_or("127.0.0.1");
-                        let http_port = actions
-                            .http_modal
-                            .as_ref()
-                            .and_then(|m| m.inputs.first())
-                            .map(|m| m.value())
-                            .unwrap_or("8080");
+                            .map(|m| m.inputs[4].value())
+                            .unwrap_or("");
+
+                        if ssh_key.is_empty() {
+                            println!("\x1b[1;31mERROR: Git SSH Key Path is required for pushing to remote and bootstrapping.\x1b[0m");
+                            std::process::exit(1);
+                        }
+
                         let init_output = std::process::Command::new("git")
                             .arg("init")
                             .arg(format!("--initial-branch={}", initial_branch))
@@ -146,20 +150,6 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                             Err(e) => {
                                 println!("\x1b[1;31mERROR: Failed to execute git init: {}\x1b[0m", e);
                                 std::process::exit(1);
-                            }
-                            _ => {}
-                        }
-
-                        let config_output = std::process::Command::new("git")
-                            .arg("config")
-                            .arg("receive.denyCurrentBranch")
-                            .arg("updateInstead")
-                            .current_dir(target_dir)
-                            .output();
-                        match config_output {
-                            Ok(out) if !out.status.success() => {
-                                let stderr = String::from_utf8_lossy(&out.stderr);
-                                println!("\x1b[1;33mWARNING: Failed to set git config receive.denyCurrentBranch:\n{}\x1b[0m", stderr.trim());
                             }
                             _ => {}
                         }
@@ -201,128 +191,60 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                             _ => {}
                         }
 
+                        let remote_add_output = std::process::Command::new("git")
+                            .arg("remote")
+                            .arg("add")
+                            .arg("origin")
+                            .arg(git_url)
+                            .current_dir(target_dir)
+                            .output();
+                        match remote_add_output {
+                            Ok(out) if !out.status.success() => {
+                                let stderr = String::from_utf8_lossy(&out.stderr);
+                                println!("\x1b[1;31mERROR: Failed to add remote to git repository:\n{}\x1b[0m", stderr.trim());
+                                std::process::exit(1);
+                            }
+                            Err(e) => {
+                                println!("\x1b[1;31mERROR: Failed to execute git remote add: {}\x1b[0m", e);
+                                std::process::exit(1);
+                            }
+                            _ => {}
+                        }
+
+                        let mut push_cmd = std::process::Command::new("git");
+                        push_cmd.arg("push").arg("-u").arg("origin").arg(initial_branch).current_dir(target_dir);
+
+                        if !ssh_key.is_empty() {
+                            let expanded_ssh_key = if let Some(stripped) = ssh_key.strip_prefix("~/") {
+                                if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
+                                    home.join(stripped).to_string_lossy().to_string()
+                                } else {
+                                    ssh_key.to_string()
+                                }
+                            } else {
+                                ssh_key.to_string()
+                            };
+                            let ssh_command = format!("ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new", expanded_ssh_key);
+                            push_cmd.env("GIT_SSH_COMMAND", ssh_command);
+                        }
+
+                        match push_cmd.output() {
+                            Ok(out) if !out.status.success() => {
+                                let stderr = String::from_utf8_lossy(&out.stderr);
+                                println!("\x1b[1;31mERROR: Failed to push to remote repository:\n{}\x1b[0m", stderr.trim());
+                                std::process::exit(1);
+                            }
+                            Err(e) => {
+                                println!("\x1b[1;31mERROR: Failed to execute git push: {}\x1b[0m", e);
+                                std::process::exit(1);
+                            }
+                            _ => {}
+                        }
+
                         println!(
-                            "\x1b[1;32m✓ Git initialized on branch '{}'\x1b[0m",
+                            "\x1b[1;32m✓ Git initialized and pushed to remote branch '{}'\x1b[0m",
                             initial_branch
                         );
-
-                        if actions.git_daemon {
-                            // Spawn git daemon detached
-                            println!("\x1b[1;36m[2.5/3] Spawning Git Daemon...\x1b[0m");
-                            
-                            let check_addr = if listen_addr.is_empty() {
-                                "127.0.0.1:9418".to_string()
-                            } else {
-                                format!("{}:9418", listen_addr)
-                            };
-                            
-                            if std::net::TcpStream::connect(&check_addr).is_ok() {
-                                println!("\x1b[1;32m✓ Git Daemon is already running on {}, reusing it.\x1b[0m", check_addr);
-                            } else {
-                                let mut daemon_cmd = std::process::Command::new("git");
-                                daemon_cmd
-                                    .arg("daemon")
-                                    .arg("--base-path=.")
-                                    .arg("--export-all")
-                                    .arg("--enable=receive-pack")
-                                    .arg("--reuseaddr");
-
-                                if !listen_addr.is_empty() {
-                                    daemon_cmd.arg(format!("--listen={}", listen_addr));
-                                }
-
-                                daemon_cmd.stdout(std::process::Stdio::piped())
-                                          .stderr(std::process::Stdio::piped());
-
-                                match daemon_cmd.current_dir(target_dir).spawn() {
-                                    Ok(mut child) => {
-                                        std::thread::sleep(std::time::Duration::from_millis(500));
-                                        if let Ok(Some(status)) = child.try_wait()
-                                            && !status.success() {
-                                                use std::io::Read;
-                                                let mut err_str = String::new();
-                                                if let Some(mut stderr) = child.stderr.take() {
-                                                    let _ = stderr.read_to_string(&mut err_str);
-                                                }
-                                                println!("\x1b[1;31mERROR: Git Daemon failed to start (exit code {}):\n{}\x1b[0m", status, err_str.trim());
-                                                std::process::exit(1);
-                                            }
-                                        println!(
-                                            "\x1b[1;32m✓ Git Daemon spawned with PID: {}\x1b[0m",
-                                            child.id()
-                                        );
-                                    }
-                                    Err(e) => {
-                                        println!("\x1b[1;31mERROR: Failed to spawn git daemon: {}\x1b[0m", e);
-                                        std::process::exit(1);
-                                    }
-                                }
-                            }
-                        }
-
-                        if actions.git_http_server {
-                            println!("\x1b[1;36m[2.5/3] Spawning Git HTTP Server (git-http-router)...\x1b[0m");
-                            
-                            // Kill any existing git-http-router to prevent zombie processes serving old paths
-                            let _ = std::process::Command::new("killall")
-                                .arg("git-http-router")
-                                .output();
-                            std::thread::sleep(std::time::Duration::from_millis(500));
-                            
-                            let check_addr = format!("127.0.0.1:{}", http_port);
-                            if std::net::TcpStream::connect(&check_addr).is_ok() {
-                                println!("\x1b[1;33mWARNING: Port {} is still in use by another program. Flux may fail to reach the router.\x1b[0m", http_port);
-                            }
-                                let http_username = actions
-                                    .http_modal
-                                    .as_ref()
-                                    .and_then(|m| m.inputs.get(1))
-                                    .map(|m| m.value())
-                                    .unwrap_or("git");
-                                let http_password = actions
-                                    .http_modal
-                                    .as_ref()
-                                    .and_then(|m| m.inputs.get(2))
-                                    .map(|m| m.value())
-                                    .unwrap_or("password");
-
-                                let mut router_cmd = std::process::Command::new("git-http-router");
-                                router_cmd.arg("--port").arg(http_port);
-                                router_cmd.arg("--root").arg(&expanded_gitops_path);
-                                if !http_username.is_empty() {
-                                    router_cmd.arg("--username").arg(http_username);
-                                }
-                                if !http_password.is_empty() {
-                                    router_cmd.arg("--password").arg(http_password);
-                                }
-
-                                router_cmd.stdout(std::process::Stdio::piped())
-                                          .stderr(std::process::Stdio::piped());
-
-                                match router_cmd.current_dir(target_dir).spawn() {
-                                    Ok(mut child) => {
-                                        std::thread::sleep(std::time::Duration::from_millis(500));
-                                        if let Ok(Some(status)) = child.try_wait()
-                                            && !status.success() {
-                                                use std::io::Read;
-                                                let mut err_str = String::new();
-                                                if let Some(mut stderr) = child.stderr.take() {
-                                                    let _ = stderr.read_to_string(&mut err_str);
-                                                }
-                                                println!("\x1b[1;31mERROR: Git HTTP Server failed to start (exit code {}):\n{}\x1b[0m", status, err_str.trim());
-                                                std::process::exit(1);
-                                            }
-                                        println!(
-                                            "\x1b[1;32m✓ Git HTTP Server spawned with PID: {}\x1b[0m",
-                                            child.id()
-                                        );
-                                    }
-                                    Err(e) => {
-                                        println!("\x1b[1;31mERROR: Failed to spawn git-http-router (is it in your PATH?): {}\x1b[0m", e);
-                                        std::process::exit(1);
-                                    }
-                                }
-                        }
                     }
 
                     if actions.bootstrap_flux
@@ -335,18 +257,10 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                         let kubeconfig = modal.inputs[3].value();
                         let ssh_key = modal.inputs[4].value();
 
-                        let http_username = actions
-                            .http_modal
-                            .as_ref()
-                            .and_then(|m| m.inputs.get(1))
-                            .map(|m| m.value())
-                            .unwrap_or("git");
-                        let http_password = actions
-                            .http_modal
-                            .as_ref()
-                            .and_then(|m| m.inputs.get(2))
-                            .map(|m| m.value())
-                            .unwrap_or("password");
+                        if ssh_key.is_empty() {
+                            println!("\x1b[1;31mERROR: Git SSH Key Path is required for bootstrapping.\x1b[0m");
+                            std::process::exit(1);
+                        }
 
                         let kubeconfig_arg = if !kubeconfig.is_empty() {
                             let expanded_kubeconfig = if let Some(stripped) = kubeconfig.strip_prefix("~/") {
@@ -486,13 +400,8 @@ spec:
                                 .arg(format!("--branch={}", branch))
                                 .arg(format!("--path={}", path));
 
-                            if git_url.starts_with("http://") {
+                            if git_url.starts_with("http://") || git_url.starts_with("https://") {
                                 flux_cmd.arg("--allow-insecure-http=true");
-                                if actions.git_http_server && !http_username.is_empty() && !http_password.is_empty() {
-                                    flux_cmd.arg(format!("--username={}", http_username));
-                                    flux_cmd.arg(format!("--password={}", http_password));
-                                    flux_cmd.arg("--token-auth");
-                                }
                             }
 
                             if let Some(ref arg) = kubeconfig_arg {
@@ -795,8 +704,6 @@ where
                                 // Save the preferences back to AppConfig!
                                 if let View::Actions(ref owned_actions) = app.view {
                                     app.config.init_git = owned_actions.init_git;
-                                    app.config.git_daemon = owned_actions.git_daemon;
-                                    app.config.git_http_server = owned_actions.git_http_server;
                                     app.config.bootstrap_flux = owned_actions.bootstrap_flux;
                                     if let Some(modal) = &owned_actions.flux_modal {
                                         app.config.flux_git_url =
@@ -807,18 +714,6 @@ where
                                             modal.inputs[3].value().to_string();
                                         app.config.flux_ssh_key_path =
                                             modal.inputs[4].value().to_string();
-                                    }
-                                    if let Some(modal) = &owned_actions.git_modal {
-                                        app.config.git_daemon_address =
-                                            modal.inputs[0].value().to_string();
-                                        app.config.git_branch = modal.inputs[1].value().to_string();
-                                    }
-                                    if let Some(modal) = &owned_actions.http_modal {
-                                        if let Ok(port) = modal.inputs[0].value().parse::<u16>() {
-                                            app.config.git_http_server_port = port;
-                                        }
-                                        app.config.git_http_server_username = modal.inputs[1].value().to_string();
-                                        app.config.git_http_server_password = modal.inputs[2].value().to_string();
                                     }
                                     let _ = app.config.save();
                                 }
@@ -900,9 +795,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
         View::Loading => "",
         View::Summary(_) => " [Tab] Focus   [Arrows] Navigate   [Enter] Submit ",
         View::Actions(state) => {
-            if state.focus == crate::actions::ActionsFocus::ModalFlux
-                || state.focus == crate::actions::ActionsFocus::ModalGit
-            {
+            if state.focus == crate::actions::ActionsFocus::ModalFlux {
                 " [Tab/Shift+Tab] Navigate   [Enter] Input   [Esc] Close "
             } else {
                 " [Tab] Focus   [Arrows] Navigate   [Enter] Toggle/Submit   [e] Configure "

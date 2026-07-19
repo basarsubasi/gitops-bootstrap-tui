@@ -14,8 +14,6 @@ pub enum ActionsFocus {
     List,
     Previous,
     Next,
-    ModalGit,
-    ModalHttp,
     ModalFlux,
 }
 
@@ -60,52 +58,6 @@ impl ModalState {
         }
     }
 
-    pub fn new_git(config: &crate::config::AppConfig) -> Self {
-        let daemon_addr = config.git_daemon_address.clone();
-        let git_branch = config.git_branch.clone();
-
-        let inputs = vec![
-            Input::default()
-                .with_value(daemon_addr.clone())
-                .with_cursor(daemon_addr.chars().count()),
-            Input::default()
-                .with_value(git_branch.clone())
-                .with_cursor(git_branch.chars().count()),
-        ];
-        let labels = vec!["Git Daemon Listen Address", "Git Initial Branch"];
-        Self {
-            inputs,
-            labels,
-            title: " GIT CONFIGURATION ",
-            current_input: 0,
-        }
-    }
-
-    pub fn new_http(config: &crate::config::AppConfig) -> Self {
-        let http_port = config.git_http_server_port.to_string();
-        let username = config.git_http_server_username.clone();
-        let password = config.git_http_server_password.clone();
-
-        let inputs = vec![
-            Input::default()
-                .with_value(http_port.clone())
-                .with_cursor(http_port.chars().count()),
-            Input::default()
-                .with_value(username.clone())
-                .with_cursor(username.chars().count()),
-            Input::default()
-                .with_value(password.clone())
-                .with_cursor(password.chars().count()),
-        ];
-        let labels = vec!["HTTP Server Port", "HTTP Username", "HTTP Password"];
-        Self {
-            inputs,
-            labels,
-            title: " HTTP SERVER CONFIGURATION ",
-            current_input: 0,
-        }
-    }
-
     pub fn handle_event(&mut self, event: &Event) -> bool {
         if let Event::Key(key) = event {
             match key.code {
@@ -146,14 +98,10 @@ impl ModalState {
 
 pub struct ActionsState {
     pub init_git: bool,
-    pub git_daemon: bool,
-    pub git_http_server: bool,
     pub bootstrap_flux: bool,
     pub list_state: ListState,
     pub focus: ActionsFocus,
     pub flux_modal: Option<ModalState>,
-    pub git_modal: Option<ModalState>,
-    pub http_modal: Option<ModalState>,
     pub action_trigger: Option<String>,
 }
 
@@ -161,38 +109,13 @@ impl ActionsState {
     pub fn new(config: &crate::config::AppConfig) -> Self {
         let mut list_state = ListState::default();
         list_state.select(Some(0));
-        let mut state = Self {
+        Self {
             init_git: config.init_git,
-            git_daemon: config.git_daemon,
-            git_http_server: config.git_http_server,
             bootstrap_flux: config.bootstrap_flux,
             list_state,
             focus: ActionsFocus::List,
             flux_modal: Some(ModalState::new_flux(config)),
-            git_modal: Some(ModalState::new_git(config)),
-            http_modal: Some(ModalState::new_http(config)),
             action_trigger: None,
-        };
-        state.sync_flux_url();
-        state
-    }
-
-    fn sync_flux_url(&mut self) {
-        if let (Some(git_modal), Some(http_modal), Some(flux_modal)) = (&self.git_modal, &self.http_modal, &mut self.flux_modal) {
-            let new_url = if self.git_http_server {
-                let port = http_modal.inputs[0].value();
-                format!("http://127.0.0.1:{}", port)
-            } else {
-                let addr = git_modal.inputs[0].value();
-                format!("git://{}", addr)
-            };
-            
-            let current_url = flux_modal.inputs[0].value();
-            if current_url.starts_with("git://") || current_url.starts_with("http://127.0.0.1") {
-                flux_modal.inputs[0] = tui_input::Input::default()
-                    .with_value(new_url.clone())
-                    .with_cursor(new_url.chars().count());
-            }
         }
     }
 
@@ -207,41 +130,13 @@ impl ActionsState {
             return false;
         }
 
-        if self.focus == ActionsFocus::ModalGit {
-            let mut closed = false;
-            if let Some(modal) = &mut self.git_modal {
-                closed = modal.handle_event(event);
-                if closed {
-                    self.focus = ActionsFocus::List;
-                }
-            }
-            if closed {
-                self.sync_flux_url();
-            }
-            return false;
-        }
-
-        if self.focus == ActionsFocus::ModalHttp {
-            let mut closed = false;
-            if let Some(modal) = &mut self.http_modal {
-                closed = modal.handle_event(event);
-                if closed {
-                    self.focus = ActionsFocus::List;
-                }
-            }
-            if closed {
-                self.sync_flux_url();
-            }
-            return false;
-        }
-
         if let Event::Key(key) = event {
             match key.code {
                 KeyCode::Down | KeyCode::Char('j') | KeyCode::Tab => {
                     match self.focus {
                         ActionsFocus::List => {
                             if let Some(i) = self.list_state.selected() {
-                                if i < 3 {
+                                if i < 1 {
                                     self.list_state.select(Some(i + 1));
                                 } else {
                                     self.focus = ActionsFocus::Next; // Move to Next
@@ -267,13 +162,13 @@ impl ActionsState {
                                 self.list_state.select(None);
                             }
                         } else {
-                            self.list_state.select(Some(3));
+                            self.list_state.select(Some(1));
                         }
                     }
                     ActionsFocus::Previous => self.focus = ActionsFocus::Next,
                     ActionsFocus::Next => {
                         self.focus = ActionsFocus::List;
-                        self.list_state.select(Some(3));
+                        self.list_state.select(Some(1));
                     }
                     _ => {}
                 },
@@ -303,23 +198,7 @@ impl ActionsState {
                     {
                         if i == 0 {
                             self.init_git = !self.init_git;
-                            if self.init_git {
-                                self.focus = ActionsFocus::ModalGit;
-                            }
-                            self.sync_flux_url();
                         } else if i == 1 {
-                            self.git_daemon = !self.git_daemon;
-                            if self.git_daemon {
-                                self.focus = ActionsFocus::ModalGit;
-                            }
-                            self.sync_flux_url();
-                        } else if i == 2 {
-                            self.git_http_server = !self.git_http_server;
-                            if self.git_http_server {
-                                self.focus = ActionsFocus::ModalHttp;
-                            }
-                            self.sync_flux_url();
-                        } else if i == 3 {
                             self.bootstrap_flux = !self.bootstrap_flux;
                             if self.bootstrap_flux {
                                 self.focus = ActionsFocus::ModalFlux;
@@ -330,14 +209,10 @@ impl ActionsState {
                 KeyCode::Char('e') => {
                     if self.focus == ActionsFocus::List
                         && let Some(i) = self.list_state.selected()
+                        && i == 1
+                        && self.bootstrap_flux
                     {
-                        if (i == 0 && self.init_git) || (i == 1 && self.git_daemon) {
-                            self.focus = ActionsFocus::ModalGit;
-                        } else if i == 2 && self.git_http_server {
-                            self.focus = ActionsFocus::ModalHttp;
-                        } else if i == 3 && self.bootstrap_flux {
-                            self.focus = ActionsFocus::ModalFlux;
-                        }
+                        self.focus = ActionsFocus::ModalFlux;
                     }
                 }
                 _ => {}
@@ -353,37 +228,12 @@ impl ActionsState {
             .split(area);
 
         let git_box = if self.init_git { "[x]" } else { "[ ]" };
-        let daemon_box = if self.git_daemon { "[x]" } else { "[ ]" };
-        let http_box = if self.git_http_server { "[x]" } else { "[ ]" };
         let flux_box = if self.bootstrap_flux { "[x]" } else { "[ ]" };
 
         let items = vec![
             ListItem::new(Span::raw(format!(
-                "{} Initialize Git Repository{}",
-                git_box,
-                if self.init_git {
-                    " (Press 'e' to configure)"
-                } else {
-                    ""
-                }
-            ))),
-            ListItem::new(Span::raw(format!(
-                "{} Spawn Git Daemon{}",
-                daemon_box,
-                if self.git_daemon {
-                    " (Press 'e' to configure address)"
-                } else {
-                    ""
-                }
-            ))),
-            ListItem::new(Span::raw(format!(
-                "{} Enable Git HTTP Server (git-http-router binary needed) {}",
-                http_box,
-                if self.git_http_server {
-                    " (Press 'e' to configure port)"
-                } else {
-                    ""
-                }
+                "{} Initialize Git Repository & Push to Remote",
+                git_box
             ))),
             ListItem::new(Span::raw(format!(
                 "{} Bootstrap Flux{}",
@@ -456,10 +306,6 @@ impl ActionsState {
 
         let active_modal = if self.focus == ActionsFocus::ModalFlux {
             self.flux_modal.as_ref()
-        } else if self.focus == ActionsFocus::ModalGit {
-            self.git_modal.as_ref()
-        } else if self.focus == ActionsFocus::ModalHttp {
-            self.http_modal.as_ref()
         } else {
             None
         };

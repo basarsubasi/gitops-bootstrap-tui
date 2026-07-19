@@ -183,21 +183,8 @@ impl SummaryState {
             )));
             if actions.init_git {
                 lines.push(ratatui::text::Line::from(
-                    "  [x] Initialize Local Git Repository",
+                    "  [x] Initialize Local Git Repository & Push to Remote",
                 ));
-                if let Some(modal) = &actions.git_modal {
-                    lines.push(ratatui::text::Line::from(format!(
-                        "      - Initial Branch: {}",
-                        modal.inputs[1].value()
-                    )));
-                }
-                lines.push(ratatui::text::Line::from("  [x] Spawn Local Git Daemon"));
-                if let Some(modal) = &actions.git_modal {
-                    lines.push(ratatui::text::Line::from(format!(
-                        "      - Listen Address: {}",
-                        modal.inputs[0].value()
-                    )));
-                }
             }
             if actions.bootstrap_flux {
                 lines.push(ratatui::text::Line::from("  [x] Bootstrap Flux CD"));

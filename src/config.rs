@@ -12,26 +12,12 @@ pub struct AppConfig {
     #[serde(default)]
     pub init_git: bool,
     #[serde(default)]
-    pub git_daemon: bool,
-    #[serde(default)]
     pub bootstrap_flux: bool,
 
-    // Git Daemon defaults
-    #[serde(default)]
-    pub git_daemon_address: String,
+    // Git specific defaults
     #[serde(default)]
     pub git_branch: String,
     
-    // HTTP Server defaults
-    #[serde(default)]
-    pub git_http_server: bool,
-    #[serde(default)]
-    pub git_http_server_port: u16,
-    #[serde(default)]
-    pub git_http_server_username: String,
-    #[serde(default)]
-    pub git_http_server_password: String,
-
     // Flux specific defaults
     #[serde(default)]
     pub flux_git_url: String,
@@ -51,18 +37,12 @@ impl Default for AppConfig {
             gitops_dir_path: "~/my-gitops-repo".to_string(),
             new_cluster_name: "my-cluster".to_string(),
             init_git: true,
-            git_daemon: false,
             bootstrap_flux: true,
-            git_daemon_address: "127.0.0.1".to_string(),
             git_branch: "main".to_string(),
-            git_http_server: true,
-            git_http_server_port: 8080,
-            git_http_server_username: "git".to_string(),
-            git_http_server_password: "password".to_string(),
-            flux_git_url: "http://127.0.0.1:8080".to_string(),
+            flux_git_url: "git@github.com:my-org/my-gitops-repo.git".to_string(),
             flux_git_branch: "main".to_string(),
             flux_kubeconfig: "~/.kube/config".to_string(),
-            flux_ssh_key_path: "".to_string(),
+            flux_ssh_key_path: "~/.ssh/id_rsa".to_string(),
         }
     }
 }
@@ -102,17 +82,14 @@ impl AppConfig {
         if config.new_cluster_name.is_empty() {
             config.new_cluster_name = "my-cluster".to_string();
         }
-        if config.flux_git_url.is_empty() {
-            config.flux_git_url = "git://127.0.0.1/".to_string();
+        if config.flux_git_url.is_empty() || config.flux_git_url.contains("127.0.0.1") {
+            config.flux_git_url = "git@github.com:my-org/my-gitops-repo.git".to_string();
         }
         if config.flux_git_branch.is_empty() {
             config.flux_git_branch = "main".to_string();
         }
         if config.flux_kubeconfig.is_empty() {
             config.flux_kubeconfig = "~/.kube/config".to_string();
-        }
-        if config.git_daemon_address.is_empty() {
-            config.git_daemon_address = "127.0.0.1".to_string();
         }
         if config.git_branch.is_empty() {
             config.git_branch = "main".to_string();
