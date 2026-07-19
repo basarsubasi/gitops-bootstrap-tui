@@ -46,7 +46,7 @@ When you generate a cluster using the TUI, it creates the following standard Kus
   - Seamlessly force-push generated manifests to any standard remote Git provider (GitHub, GitLab, Gitea, Bitbucket) using SSH keys or HTTP tokens.
   - Bootstrap Flux CD securely using `flux bootstrap git` for provider-agnostic compatibility.
 - **Live Interactive Execution Engine**: Stream complex CLI executions (like `flux bootstrap`) right into the TUI. We natively strip ANSI escape codes, handle log scrollback, and parse interactive `[y/N]` prompts so you can type answers without breaking the UI context!
-- **Persistent Configuration**: User configurations and inputs are saved automatically to `~/.config/gitops-bootstrap-tui/config.json` and restored on the next run.
+- **Persistent Configuration**: User configurations and inputs are saved automatically to `~/.config/gitops-bootstrap-tui/config.json` and restored on the next run. See [`example_config.json`](file:///Users/basarsubasi/Projects/gitops-tui/example_config.json) in this repository for the schema.
 
 ## Prerequisites
 

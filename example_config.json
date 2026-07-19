@@ -1,0 +1,13 @@
+{
+  "template_repo_url": "https://github.com/basarsubasi/flux-templates.git",
+  "base_dir_path": "bases",
+  "gitops_dir_path": "~/my-gitops-repo",
+  "new_cluster_name": "my-cluster-1",
+  "init_git": true,
+  "bootstrap_flux": true,
+  "git_branch": "main",
+  "flux_git_url": "git@github.com:my-org/my-gitops-repo.git",
+  "flux_git_branch": "main",
+  "flux_kubeconfig": "~/.kube/config",
+  "flux_ssh_key_path": "~/.ssh/id_ed25519"
+}
