@@ -112,7 +112,7 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                 );
 
                 if let Some(actions) = app.pending_actions {
-                    if actions.init_git {
+                    if actions.init_git || actions.git_http_server {
                         println!("\x1b[1;36m[2/3] Initializing Git Repository...\x1b[0m");
                         let target_dir = std::path::Path::new(&expanded_gitops_path);
 
@@ -126,6 +126,12 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                             .as_ref()
                             .map(|m| m.inputs[0].value())
                             .unwrap_or("127.0.0.1");
+                        let http_port = actions
+                            .git_modal
+                            .as_ref()
+                            .and_then(|m| m.inputs.get(2))
+                            .map(|m| m.value())
+                            .unwrap_or("8080");
 
                         let init_output = std::process::Command::new("git")
                             .arg("init")
@@ -187,54 +193,96 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                             initial_branch
                         );
 
-                        // Spawn git daemon detached
-                        println!("\x1b[1;36m[2.5/3] Spawning Git Daemon...\x1b[0m");
-                        
-                        let check_addr = if listen_addr.is_empty() {
-                            "127.0.0.1:9418".to_string()
-                        } else {
-                            format!("{}:9418", listen_addr)
-                        };
-                        
-                        if std::net::TcpStream::connect(&check_addr).is_ok() {
-                            println!("\x1b[1;32m✓ Git Daemon is already running on {}, reusing it.\x1b[0m", check_addr);
-                        } else {
-                            let mut daemon_cmd = std::process::Command::new("git");
-                            daemon_cmd
-                                .arg("daemon")
-                                .arg("--base-path=.")
-                                .arg("--export-all")
-                                .arg("--enable=receive-pack")
-                                .arg("--reuseaddr");
+                        if actions.init_git {
+                            // Spawn git daemon detached
+                            println!("\x1b[1;36m[2.5/3] Spawning Git Daemon...\x1b[0m");
+                            
+                            let check_addr = if listen_addr.is_empty() {
+                                "127.0.0.1:9418".to_string()
+                            } else {
+                                format!("{}:9418", listen_addr)
+                            };
+                            
+                            if std::net::TcpStream::connect(&check_addr).is_ok() {
+                                println!("\x1b[1;32m✓ Git Daemon is already running on {}, reusing it.\x1b[0m", check_addr);
+                            } else {
+                                let mut daemon_cmd = std::process::Command::new("git");
+                                daemon_cmd
+                                    .arg("daemon")
+                                    .arg("--base-path=.")
+                                    .arg("--export-all")
+                                    .arg("--enable=receive-pack")
+                                    .arg("--reuseaddr");
 
-                            if !listen_addr.is_empty() {
-                                daemon_cmd.arg(format!("--listen={}", listen_addr));
-                            }
-
-                            daemon_cmd.stdout(std::process::Stdio::piped())
-                                      .stderr(std::process::Stdio::piped());
-
-                            match daemon_cmd.current_dir(target_dir).spawn() {
-                                Ok(mut child) => {
-                                    std::thread::sleep(std::time::Duration::from_millis(500));
-                                    if let Ok(Some(status)) = child.try_wait()
-                                        && !status.success() {
-                                            use std::io::Read;
-                                            let mut err_str = String::new();
-                                            if let Some(mut stderr) = child.stderr.take() {
-                                                let _ = stderr.read_to_string(&mut err_str);
-                                            }
-                                            println!("\x1b[1;31mERROR: Git Daemon failed to start (exit code {}):\n{}\x1b[0m", status, err_str.trim());
-                                            std::process::exit(1);
-                                        }
-                                    println!(
-                                        "\x1b[1;32m✓ Git Daemon spawned with PID: {}\x1b[0m",
-                                        child.id()
-                                    );
+                                if !listen_addr.is_empty() {
+                                    daemon_cmd.arg(format!("--listen={}", listen_addr));
                                 }
-                                Err(e) => {
-                                    println!("\x1b[1;31mERROR: Failed to spawn git daemon: {}\x1b[0m", e);
-                                    std::process::exit(1);
+
+                                daemon_cmd.stdout(std::process::Stdio::piped())
+                                          .stderr(std::process::Stdio::piped());
+
+                                match daemon_cmd.current_dir(target_dir).spawn() {
+                                    Ok(mut child) => {
+                                        std::thread::sleep(std::time::Duration::from_millis(500));
+                                        if let Ok(Some(status)) = child.try_wait()
+                                            && !status.success() {
+                                                use std::io::Read;
+                                                let mut err_str = String::new();
+                                                if let Some(mut stderr) = child.stderr.take() {
+                                                    let _ = stderr.read_to_string(&mut err_str);
+                                                }
+                                                println!("\x1b[1;31mERROR: Git Daemon failed to start (exit code {}):\n{}\x1b[0m", status, err_str.trim());
+                                                std::process::exit(1);
+                                            }
+                                        println!(
+                                            "\x1b[1;32m✓ Git Daemon spawned with PID: {}\x1b[0m",
+                                            child.id()
+                                        );
+                                    }
+                                    Err(e) => {
+                                        println!("\x1b[1;31mERROR: Failed to spawn git daemon: {}\x1b[0m", e);
+                                        std::process::exit(1);
+                                    }
+                                }
+                            }
+                        }
+
+                        if actions.git_http_server {
+                            println!("\x1b[1;36m[2.5/3] Spawning Git HTTP Server (git-http-router)...\x1b[0m");
+                            
+                            let check_addr = format!("127.0.0.1:{}", http_port);
+                            if std::net::TcpStream::connect(&check_addr).is_ok() {
+                                println!("\x1b[1;32m✓ Git HTTP Server is already running on {}, reusing it.\x1b[0m", check_addr);
+                            } else {
+                                let mut router_cmd = std::process::Command::new("git-http-router");
+                                router_cmd.arg("--port").arg(http_port);
+                                router_cmd.arg("--root").arg(".");
+
+                                router_cmd.stdout(std::process::Stdio::piped())
+                                          .stderr(std::process::Stdio::piped());
+
+                                match router_cmd.current_dir(target_dir).spawn() {
+                                    Ok(mut child) => {
+                                        std::thread::sleep(std::time::Duration::from_millis(500));
+                                        if let Ok(Some(status)) = child.try_wait()
+                                            && !status.success() {
+                                                use std::io::Read;
+                                                let mut err_str = String::new();
+                                                if let Some(mut stderr) = child.stderr.take() {
+                                                    let _ = stderr.read_to_string(&mut err_str);
+                                                }
+                                                println!("\x1b[1;31mERROR: Git HTTP Server failed to start (exit code {}):\n{}\x1b[0m", status, err_str.trim());
+                                                std::process::exit(1);
+                                            }
+                                        println!(
+                                            "\x1b[1;32m✓ Git HTTP Server spawned with PID: {}\x1b[0m",
+                                            child.id()
+                                        );
+                                    }
+                                    Err(e) => {
+                                        println!("\x1b[1;31mERROR: Failed to spawn git-http-router (is it in your PATH?): {}\x1b[0m", e);
+                                        std::process::exit(1);
+                                    }
                                 }
                             }
                         }
@@ -689,6 +737,7 @@ where
                                 // Save the preferences back to AppConfig!
                                 if let View::Actions(ref owned_actions) = app.view {
                                     app.config.init_git_daemon = owned_actions.init_git;
+                                    app.config.git_http_server = owned_actions.git_http_server;
                                     app.config.bootstrap_flux = owned_actions.bootstrap_flux;
                                     if let Some(modal) = &owned_actions.flux_modal {
                                         app.config.flux_git_url =
@@ -697,11 +746,16 @@ where
                                             modal.inputs[1].value().to_string();
                                         app.config.flux_kubeconfig =
                                             modal.inputs[3].value().to_string();
+                                        app.config.flux_ssh_key_path =
+                                            modal.inputs[4].value().to_string();
                                     }
                                     if let Some(modal) = &owned_actions.git_modal {
                                         app.config.git_daemon_address =
                                             modal.inputs[0].value().to_string();
                                         app.config.git_branch = modal.inputs[1].value().to_string();
+                                        if let Ok(port) = modal.inputs[2].value().parse::<u16>() {
+                                            app.config.git_http_server_port = port;
+                                        }
                                     }
                                     let _ = app.config.save();
                                 }

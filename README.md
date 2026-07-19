@@ -17,6 +17,7 @@ You can also use your own templates, by creating a similar structure in a direct
 - **Post-Generation Actions**:
   - Automatically initialize a local Git repository and commit the bootstrapped structure.
   - Spawn a local `git daemon` to serve your repository securely.
+  - Option to spawn a native asynchronous HTTP Server via `git-http-router` to seamlessly serve local repositories over HTTP instead of `git://`. [https://github.com/basarsubasi/git-http-router](https://github.com/basarsubasi/git-http-router)
   - Bootstrap Flux CD directly to your Kubernetes cluster seamlessly from the UI.
 - **Persistent Configuration**: User configurations and inputs are saved automatically to `~/.config/gitops-bootstrap-tui/config.json` and restored on the next run.
 
@@ -24,6 +25,8 @@ You can also use your own templates, by creating a similar structure in a direct
 
 - `git` CLI installed and available in `$PATH`
 - `flux` CLI installed and available in `$PATH`
+- `kubectl` CLI installed and available in `$PATH`
+- (Optional) `git-http-router` installed and available in `$PATH` for the native HTTP server option.
 - A valid Kubernetes cluster (e.g., Kind, Minikube, K3s) and `kubeconfig` for Flux bootstrap
 
 ## Installation

@@ -62,6 +62,7 @@ impl ModalState {
     pub fn new_git(config: &crate::config::AppConfig) -> Self {
         let daemon_addr = config.git_daemon_address.clone();
         let git_branch = config.git_branch.clone();
+        let http_port = config.git_http_server_port.to_string();
 
         let inputs = vec![
             Input::default()
@@ -70,12 +71,15 @@ impl ModalState {
             Input::default()
                 .with_value(git_branch.clone())
                 .with_cursor(git_branch.chars().count()),
+            Input::default()
+                .with_value(http_port.clone())
+                .with_cursor(http_port.chars().count()),
         ];
-        let labels = vec!["Git Daemon Listen Address", "Git Initial Branch"];
+        let labels = vec!["Git Daemon Listen Address", "Git Initial Branch", "HTTP Server Port"];
         Self {
             inputs,
             labels,
-            title: " GIT DAEMON CONFIGURATION ",
+            title: " GIT DAEMON & HTTP CONFIGURATION ",
             current_input: 0,
         }
     }
@@ -120,6 +124,7 @@ impl ModalState {
 
 pub struct ActionsState {
     pub init_git: bool,
+    pub git_http_server: bool,
     pub bootstrap_flux: bool,
     pub list_state: ListState,
     pub focus: ActionsFocus,
@@ -134,6 +139,7 @@ impl ActionsState {
         list_state.select(Some(0));
         Self {
             init_git: config.init_git_daemon,
+            git_http_server: config.git_http_server,
             bootstrap_flux: config.bootstrap_flux,
             list_state,
             focus: ActionsFocus::List,
@@ -236,6 +242,12 @@ impl ActionsState {
                                 self.focus = ActionsFocus::ModalGit;
                             }
                         } else if i == 1 {
+                            self.git_http_server = !self.git_http_server;
+                            if self.git_http_server {
+                                // Re-use the git modal or handle HTTP port? We will use a separate modal later or just put it in Git Modal.
+                                self.focus = ActionsFocus::ModalGit;
+                            }
+                        } else if i == 2 {
                             self.bootstrap_flux = !self.bootstrap_flux;
                             if self.bootstrap_flux {
                                 self.focus = ActionsFocus::ModalFlux;
@@ -247,9 +259,9 @@ impl ActionsState {
                     if self.focus == ActionsFocus::List
                         && let Some(i) = self.list_state.selected()
                     {
-                        if i == 0 && self.init_git {
+                        if (i == 0 && self.init_git) || (i == 1 && self.git_http_server) {
                             self.focus = ActionsFocus::ModalGit;
-                        } else if i == 1 && self.bootstrap_flux {
+                        } else if i == 2 && self.bootstrap_flux {
                             self.focus = ActionsFocus::ModalFlux;
                         }
                     }
@@ -267,6 +279,7 @@ impl ActionsState {
             .split(area);
 
         let git_box = if self.init_git { "[x]" } else { "[ ]" };
+        let http_box = if self.git_http_server { "[x]" } else { "[ ]" };
         let flux_box = if self.bootstrap_flux { "[x]" } else { "[ ]" };
 
         let items = vec![
@@ -275,6 +288,15 @@ impl ActionsState {
                 git_box,
                 if self.init_git {
                     " (Press 'e' to configure)"
+                } else {
+                    ""
+                }
+            ))),
+            ListItem::new(Span::raw(format!(
+                "{} Enable Git HTTP Server (git-http-router binary needed) {}",
+                http_box,
+                if self.git_http_server {
+                    " (Press 'e' to configure port)"
                 } else {
                     ""
                 }

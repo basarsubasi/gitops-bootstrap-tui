@@ -19,6 +19,10 @@ pub struct AppConfig {
     pub git_daemon_address: String,
     #[serde(default)]
     pub git_branch: String,
+    #[serde(default)]
+    pub git_http_server: bool,
+    #[serde(default)]
+    pub git_http_server_port: u16,
 
     // Flux specific defaults
     #[serde(default)]
@@ -42,6 +46,8 @@ impl Default for AppConfig {
             bootstrap_flux: false,
             git_daemon_address: "127.0.0.1".to_string(),
             git_branch: "main".to_string(),
+            git_http_server: false,
+            git_http_server_port: 8080,
             flux_git_url: "git://127.0.0.1/".to_string(),
             flux_git_branch: "main".to_string(),
             flux_kubeconfig: "~/.kube/config".to_string(),
