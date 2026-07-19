@@ -14,16 +14,43 @@ Default template and the expected directory structure can be found at the [https
 
 You can also use your own templates, by creating a similar structure in a directory and providing the path to the `gitops-bootstrap-tui`.
 
+### Generated GitOps Output Structure
+When you generate a cluster using the TUI, it intelligently creates the following layered GitOps structure optimized for Kustomize and Flux dependencies:
+
+```text
+.
+├── bases/                             # Copied from templates
+└── <cluster-name>/                    # Your generated GitOps directory
+    ├── flux-system/                   # Flux CD core controllers & syncs
+    │   ├── gotk-components.yaml
+    │   ├── gotk-sync.yaml
+    │   ├── sync-repositories.yaml     # Priority 1
+    │   ├── sync-infrastructure.yaml   # Priority 2
+    │   └── sync-apps.yaml             # Priority 3
+    ├── repositories/                  # Centralized HelmRepositories
+    │   └── kustomization.yaml
+    ├── infrastructure/                # Layer Kustomization
+    │   ├── kustomization.yaml
+    │   └── networking/
+    │       └── cilium/
+    │           ├── kustomization.yaml # Points to bases
+    │           └── patch.yaml         # Your custom Helm values
+    └── apps/
+        └── ...
+```
+
 ## Features
 
 - **Interactive Wizard**: A guided wizard to gather essential bootstrap configuration (Base Directory, Cluster Name, Git URL, etc.).
 - **Component Explorer**: A navigable tree view to explore, enable, and disable Helm releases and GitOps components before generation.
 - **Value Customization**: You can customize the default helm chart values before generating the templates.
+- **Layer-Based GitOps Generation**: Dynamically groups selected components into layers (`infrastructure`, `databases`, `apps`) and constructs isolated Kustomize trees to prevent merge conflicts and duplicate definitions.
+- **Native Flux Prioritization**: Automatically generates Flux `Kustomization` sync manifests (`sync-infrastructure.yaml`, etc.) packed with `dependsOn` configurations to ensure a robust, prioritized deployment lifecycle.
 - **Post-Generation Actions**:
-  - Automatically initialize a local Git repository, pull existing commits natively (resolving conflicts by preferring remote versions), and commit the bootstrapped structure.
-
+  - Automatically initialize a local Git repository, natively pull existing commits (resolving conflicts by preferring remote versions), and commit the bootstrapped structure.
   - Seamlessly push generated manifests to any standard remote Git provider (GitHub, GitLab, Gitea, Bitbucket) using SSH keys or HTTP tokens.
-  - Bootstrap Flux CD directly to your Kubernetes cluster from the UI securely using `flux bootstrap git` for provider-agnostic compatibility.
+  - Bootstrap Flux CD securely using `flux bootstrap git` for provider-agnostic compatibility.
+- **Live Interactive Execution Engine**: Stream complex CLI executions (like `flux bootstrap`) right into the TUI. We natively strip ANSI escape codes and parse interactive `[y/N]` prompts so you can type answers without breaking the UI context!
 - **Persistent Configuration**: User configurations and inputs are saved automatically to `~/.config/gitops-bootstrap-tui/config.json` and restored on the next run.
 
 ## Prerequisites
