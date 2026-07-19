@@ -173,10 +173,10 @@ impl ActionsState {
         if let (Some(git_modal), Some(http_modal), Some(flux_modal)) = (&self.git_modal, &self.http_modal, &mut self.flux_modal) {
             let new_url = if self.git_http_server {
                 let port = http_modal.inputs[0].value();
-                format!("http://127.0.0.1:{}/", port)
+                format!("http://127.0.0.1:{}", port)
             } else {
                 let addr = git_modal.inputs[0].value();
-                format!("git://{}/", addr)
+                format!("git://{}", addr)
             };
             
             let current_url = flux_modal.inputs[0].value();

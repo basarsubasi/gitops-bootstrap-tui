@@ -51,7 +51,7 @@ impl Default for AppConfig {
             git_branch: "main".to_string(),
             git_http_server: true,
             git_http_server_port: 8080,
-            flux_git_url: "http://127.0.0.1:8080/".to_string(),
+            flux_git_url: "http://127.0.0.1:8080".to_string(),
             flux_git_branch: "main".to_string(),
             flux_kubeconfig: "~/.kube/config".to_string(),
             flux_ssh_key_path: "".to_string(),
