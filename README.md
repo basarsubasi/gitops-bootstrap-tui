@@ -3,6 +3,8 @@
 > [!CAUTION]
 > **THIS PROJECT IS MEANT TO BE USED ON EPHEMERAL CLUSTERS FOR EXPERIMENTATION. DO NOT USE IN PRODUCTION.**
 
+  - **DANGER:** The pipeline uses `git push -f` (force push) when pushing generated manifests to your remote branch. This ensures the repo precisely mirrors your local generation but *will overwrite remote history*. 
+
 An interactive Terminal User Interface (TUI) tool written in Rust to seamlessly bootstrap and manage local GitOps repositories and Flux CD deployments, optimal for ephemeral k8s clusters and stack experimentation.
 
 
@@ -18,7 +20,8 @@ You can also use your own templates, by creating a similar structure in a direct
 - **Component Explorer**: A navigable tree view to explore, enable, and disable Helm releases and GitOps components before generation.
 - **Value Customization**: You can customize the default helm chart values before generating the templates.
 - **Post-Generation Actions**:
-  - Automatically initialize a local Git repository, pull existing commits natively (ignoring conflicts), and commit the bootstrapped structure.
+  - Automatically initialize a local Git repository, pull existing commits natively (resolving conflicts by preferring remote versions), and commit the bootstrapped structure.
+
   - Seamlessly push generated manifests to any standard remote Git provider (GitHub, GitLab, Gitea, Bitbucket) using SSH keys or HTTP tokens.
   - Bootstrap Flux CD directly to your Kubernetes cluster from the UI securely using `flux bootstrap git` for provider-agnostic compatibility.
 - **Persistent Configuration**: User configurations and inputs are saved automatically to `~/.config/gitops-bootstrap-tui/config.json` and restored on the next run.

@@ -185,6 +185,10 @@ impl SummaryState {
                 lines.push(ratatui::text::Line::from(
                     "  [x] Initialize Local Git Repository & Push to Remote",
                 ));
+                lines.push(ratatui::text::Line::from(Span::styled(
+                    "      DANGER: Will FORCE PUSH and OVERWRITE remote history!",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                )));
             }
             if actions.bootstrap_flux {
                 lines.push(ratatui::text::Line::from("  [x] Bootstrap Flux CD"));

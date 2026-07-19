@@ -701,6 +701,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
 
 pub fn start_execution_thread(app: &mut App) {
     let (tx, rx) = std::sync::mpsc::channel();
+    let (input_tx, input_rx) = std::sync::mpsc::channel();
     
     let config = app.config.clone();
     let pending_generation = app.pending_generation.clone();
@@ -731,6 +732,62 @@ pub fn start_execution_thread(app: &mut App) {
         let path = &path_str;
         let kubeconfig = &kubeconfig_str;
         let ssh_key = &ssh_key_str;
+
+        fn run_interactive_cmd(
+            mut cmd: std::process::Command,
+            name: &str,
+            log_tx: &std::sync::mpsc::Sender<crate::executing::ExecutionEvent>,
+            input_rx: &std::sync::mpsc::Receiver<String>,
+        ) -> Result<(), String> {
+            use std::io::{Read, Write};
+            cmd.stdin(std::process::Stdio::piped())
+               .stdout(std::process::Stdio::piped())
+               .stderr(std::process::Stdio::piped());
+
+            let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+
+            let mut stdout = child.stdout.take().unwrap();
+            let mut stderr = child.stderr.take().unwrap();
+            let mut stdin = child.stdin.take().unwrap();
+
+            let tx_out = log_tx.clone();
+            std::thread::spawn(move || {
+                let mut buf = [0; 256];
+                while let Ok(n) = stdout.read(&mut buf) {
+                    if n == 0 { break; }
+                    let s = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let _ = tx_out.send(crate::executing::ExecutionEvent::LogChunk(s));
+                }
+            });
+
+            let tx_err = log_tx.clone();
+            std::thread::spawn(move || {
+                let mut buf = [0; 256];
+                while let Ok(n) = stderr.read(&mut buf) {
+                    if n == 0 { break; }
+                    let s = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let _ = tx_err.send(crate::executing::ExecutionEvent::LogChunk(s));
+                }
+            });
+
+            loop {
+                if let Ok(Some(status)) = child.try_wait() {
+                    if status.success() {
+                        return Ok(());
+                    } else {
+                        return Err(format!("{} failed with exit code {}", name, status));
+                    }
+                }
+
+                while let Ok(input) = input_rx.try_recv() {
+                    let _ = stdin.write_all(input.as_bytes());
+                    let _ = stdin.flush();
+                }
+
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+
     if let Some((checked_paths, customized_paths)) = pending_generation {
         let _ = tx.send(crate::executing::ExecutionEvent::Log("\x1b[1;36m[1/3] Generating Output GitOps Directory...\x1b[0m".to_string()));
         if let Ok(git_mgr) = crate::git::GitManager::new(&config.template_repo_url) {
@@ -897,17 +954,10 @@ pub fn start_execution_thread(app: &mut App) {
                             push_cmd.env("GIT_SSH_COMMAND", ssh_cmd);
                         }
 
-                        match push_cmd.output() {
-                            Ok(out) if !out.status.success() => {
-                                let stderr = String::from_utf8_lossy(&out.stderr);
-                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to push to remote repository:\n{}\x1b[0m", stderr.trim())));
-                                { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
-                            }
-                            Err(e) => {
-                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to execute git push: {}\x1b[0m", e)));
-                                { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
-                            }
-                            _ => {}
+                        if let Err(e) = run_interactive_cmd(push_cmd, "git push", &tx, &input_rx) {
+                            let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: {}\x1b[0m", e)));
+                            let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into()));
+                            return;
                         }
 
                         let _ = tx.send(crate::executing::ExecutionEvent::Log(format!(
@@ -954,20 +1004,7 @@ pub fn start_execution_thread(app: &mut App) {
                             None
                         };
 
-                        let run_flux_cmd = |mut cmd: std::process::Command, name: &str| {
-                            match cmd.status() {
-                                Ok(status) => {
-                                    if !status.success() {
-                                        let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: {} failed (exit code {})\x1b[0m", name, status)));
-                                        { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into()));}
-                                    }
-                                }
-                                Err(e) => {
-                                    let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to execute {}: {}\x1b[0m", name, e)));
-                                    { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into()));}
-                                }
-                            }
-                        };
+
 
                             let mut flux_git_url = git_url.to_string();
                             if flux_git_url.starts_with("git@") && !flux_git_url.starts_with("ssh://")
@@ -995,7 +1032,11 @@ pub fn start_execution_thread(app: &mut App) {
                                 flux_cmd.arg(arg);
                             }
 
-                            run_flux_cmd(flux_cmd, "flux bootstrap");
+                            if let Err(e) = run_interactive_cmd(flux_cmd, "flux bootstrap", &tx, &input_rx) {
+                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: {}\x1b[0m", e)));
+                                let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into()));
+                                return;
+                            }
                             let _ = tx.send(crate::executing::ExecutionEvent::Log("\x1b[1;32m✓ Flux bootstrap completed successfully\x1b[0m".to_string()));
                     }
                 }
@@ -1006,5 +1047,5 @@ pub fn start_execution_thread(app: &mut App) {
         let _ = tx.send(crate::executing::ExecutionEvent::Done);
     });
 
-    app.view = View::Executing(crate::executing::ExecutingState::new(rx));
+    app.view = View::Executing(crate::executing::ExecutingState::new(rx, Some(input_tx)));
 }
