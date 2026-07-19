@@ -44,16 +44,25 @@ impl ExecutingState {
             match event {
                 ExecutionEvent::Log(msg) => self.logs.push(msg),
                 ExecutionEvent::LogChunk(chunk) => {
-                    let parts: Vec<&str> = chunk.split('\n').collect();
-                    for (i, part) in parts.iter().enumerate() {
-                        if i == 0 {
+                    let cleaned = String::from_utf8_lossy(
+                        &strip_ansi_escapes::strip(chunk.as_bytes())
+                    ).to_string();
+
+                    for c in cleaned.chars() {
+                        if c == '\n' {
+                            self.logs.push(String::new());
+                        } else if c == '\r' {
                             if let Some(last) = self.logs.last_mut() {
-                                last.push_str(part);
+                                // If we get \r, just clear the current line so it redraws over it
+                                last.clear();
                             } else {
-                                self.logs.push(part.to_string());
+                                self.logs.push(String::new());
                             }
                         } else {
-                            self.logs.push(part.to_string());
+                            if self.logs.is_empty() {
+                                self.logs.push(String::new());
+                            }
+                            self.logs.last_mut().unwrap().push(c);
                         }
                     }
                 }
