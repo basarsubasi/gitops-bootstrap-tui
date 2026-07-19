@@ -181,8 +181,13 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                         match commit_output {
                             Ok(out) if !out.status.success() => {
                                 let stderr = String::from_utf8_lossy(&out.stderr);
-                                println!("\x1b[1;31mERROR: Failed to commit to git repository:\n{}\x1b[0m", stderr.trim());
-                                std::process::exit(1);
+                                let stdout = String::from_utf8_lossy(&out.stdout);
+                                if stdout.contains("nothing to commit") || stderr.contains("nothing to commit") {
+                                    println!("\x1b[1;33mℹ Nothing to commit (working tree clean).\x1b[0m");
+                                } else {
+                                    println!("\x1b[1;31mERROR: Failed to commit to git repository:\n{}\x1b[0m", stderr.trim());
+                                    std::process::exit(1);
+                                }
                             }
                             Err(e) => {
                                 println!("\x1b[1;31mERROR: Failed to execute git commit: {}\x1b[0m", e);
@@ -201,8 +206,12 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                         match remote_add_output {
                             Ok(out) if !out.status.success() => {
                                 let stderr = String::from_utf8_lossy(&out.stderr);
-                                println!("\x1b[1;31mERROR: Failed to add remote to git repository:\n{}\x1b[0m", stderr.trim());
-                                std::process::exit(1);
+                                if stderr.contains("already exists") {
+                                    println!("\x1b[1;33mℹ Remote origin already exists, skipping addition.\x1b[0m");
+                                } else {
+                                    println!("\x1b[1;31mERROR: Failed to add remote to git repository:\n{}\x1b[0m", stderr.trim());
+                                    std::process::exit(1);
+                                }
                             }
                             Err(e) => {
                                 println!("\x1b[1;31mERROR: Failed to execute git remote add: {}\x1b[0m", e);
