@@ -211,10 +211,7 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                             _ => {}
                         }
 
-                        let mut push_cmd = std::process::Command::new("git");
-                        push_cmd.arg("push").arg("-u").arg("origin").arg(initial_branch).current_dir(target_dir);
-
-                        if !ssh_key.is_empty() {
+                        let ssh_env = if !ssh_key.is_empty() {
                             let expanded_ssh_key = if let Some(stripped) = ssh_key.strip_prefix("~/") {
                                 if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
                                     home.join(stripped).to_string_lossy().to_string()
@@ -224,8 +221,33 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                             } else {
                                 ssh_key.to_string()
                             };
-                            let ssh_command = format!("ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new", expanded_ssh_key);
-                            push_cmd.env("GIT_SSH_COMMAND", ssh_command);
+                            Some(format!("ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new", expanded_ssh_key))
+                        } else {
+                            None
+                        };
+
+                        // Attempt to pull and rebase before pushing to handle existing repos seamlessly
+                        let mut pull_cmd = std::process::Command::new("git");
+                        pull_cmd
+                            .arg("pull")
+                            .arg("origin")
+                            .arg(initial_branch)
+                            .arg("--rebase")
+                            .arg("--allow-unrelated-histories")
+                            .current_dir(target_dir);
+
+                        if let Some(ref ssh_cmd) = ssh_env {
+                            pull_cmd.env("GIT_SSH_COMMAND", ssh_cmd);
+                        }
+
+                        // We ignore the result of pull, as it will fail on entirely empty repositories, which is perfectly fine.
+                        let _ = pull_cmd.output();
+
+                        let mut push_cmd = std::process::Command::new("git");
+                        push_cmd.arg("push").arg("-u").arg("origin").arg(initial_branch).current_dir(target_dir);
+
+                        if let Some(ref ssh_cmd) = ssh_env {
+                            push_cmd.env("GIT_SSH_COMMAND", ssh_cmd);
                         }
 
                         match push_cmd.output() {
@@ -392,11 +414,19 @@ spec:
 
                             println!("\x1b[1;32m✓ Flux unauthenticated bootstrap completed successfully\x1b[0m");
                         } else {
+                            let mut flux_git_url = git_url.to_string();
+                            if flux_git_url.starts_with("git@") && !flux_git_url.starts_with("ssh://") {
+                                if let Some(colon_pos) = flux_git_url.find(':') {
+                                    flux_git_url.replace_range(colon_pos..colon_pos+1, "/");
+                                    flux_git_url.insert_str(0, "ssh://");
+                                }
+                            }
+
                             let mut flux_cmd = std::process::Command::new("flux");
                             flux_cmd
                                 .arg("bootstrap")
                                 .arg("git")
-                                .arg(format!("--url={}", git_url))
+                                .arg(format!("--url={}", flux_git_url))
                                 .arg(format!("--branch={}", branch))
                                 .arg(format!("--path={}", path));
 

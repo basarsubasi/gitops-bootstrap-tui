@@ -42,7 +42,7 @@ impl Default for AppConfig {
             flux_git_url: "git@github.com:my-org/my-gitops-repo.git".to_string(),
             flux_git_branch: "main".to_string(),
             flux_kubeconfig: "~/.kube/config".to_string(),
-            flux_ssh_key_path: "~/.ssh/id_rsa".to_string(),
+            flux_ssh_key_path: "~/.ssh/id_ed25519".to_string(),
         }
     }
 }
