@@ -89,6 +89,10 @@ where
     std::io::Error: From<<B as Backend>::Error>,
 {
     loop {
+        if let View::Executing(exec) = &mut app.view {
+            exec.poll_events();
+        }
+
         terminal.draw(|f| ui(f, app))?;
 
         if event::poll(Duration::from_millis(250))? {
@@ -102,7 +106,6 @@ where
 
                 match &mut app.view {
                     View::Executing(exec) => {
-                        exec.poll_events();
                         let triggered = exec.handle_event(&ev);
                         if triggered {
                             if exec.should_quit {
@@ -888,7 +891,7 @@ pub fn start_execution_thread(app: &mut App) {
                         let _ = pull_cmd.output();
 
                         let mut push_cmd = std::process::Command::new("git");
-                        push_cmd.arg("push").arg("-u").arg("origin").arg(initial_branch).current_dir(target_dir);
+                        push_cmd.arg("push").arg("-f").arg("-u").arg("origin").arg(initial_branch).current_dir(target_dir);
 
                         if let Some(ref ssh_cmd) = ssh_env {
                             push_cmd.env("GIT_SSH_COMMAND", ssh_cmd);
