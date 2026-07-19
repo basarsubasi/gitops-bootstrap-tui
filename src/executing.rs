@@ -157,11 +157,21 @@ impl ExecutingState {
             ui_lines.push(ratatui::text::Line::from(ratatui::text::Span::styled("[RUNNING...]", ratatui::style::Style::default().fg(ratatui::style::Color::Yellow).add_modifier(ratatui::style::Modifier::BOLD))));
         }
 
-        // Auto-scroll to bottom
-        let num_lines = ui_lines.len();
-        let height = area.height as usize;
-        let scroll = if num_lines > height {
-            (num_lines - height + 2) as u16
+        // Auto-scroll to bottom by calculating actual wrapped physical lines
+        let width = area.width.saturating_sub(2).max(1) as usize; // account for borders
+        let mut physical_lines = 0;
+        for line in &ui_lines {
+            let line_width = line.width();
+            if line_width == 0 {
+                physical_lines += 1;
+            } else {
+                physical_lines += (line_width.saturating_sub(1) / width) + 1;
+            }
+        }
+
+        let height = area.height.saturating_sub(2) as usize; // account for borders
+        let scroll = if physical_lines > height {
+            (physical_lines - height) as u16
         } else {
             0
         };

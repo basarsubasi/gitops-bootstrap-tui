@@ -924,24 +924,8 @@ pub fn start_execution_thread(app: &mut App) {
                             None
                         };
 
-                        // Attempt to pull and rebase before pushing to handle existing repos seamlessly
-                        let mut pull_cmd = std::process::Command::new("git");
-                        pull_cmd
-                            .arg("pull")
-                            .arg("origin")
-                            .arg(initial_branch)
-                            .arg("--rebase")
-                            .arg("--allow-unrelated-histories")
-                            .arg("-X")
-                            .arg("theirs")
-                            .current_dir(target_dir);
+                        // We only perform a force push to the remote branch, discarding remote state
 
-                        if let Some(ref ssh_cmd) = ssh_env {
-                            pull_cmd.env("GIT_SSH_COMMAND", ssh_cmd);
-                        }
-
-                        // We ignore the result of pull, as it will fail on entirely empty repositories, which is perfectly fine.
-                        let _ = pull_cmd.output();
 
                         let mut push_cmd = std::process::Command::new("git");
                         push_cmd.arg("push").arg("-f").arg("-u").arg("origin").arg(initial_branch).current_dir(target_dir);
