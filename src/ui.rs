@@ -1,5 +1,5 @@
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
+    event::{self, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -55,14 +55,14 @@ impl App {
 pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     let orig_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+        let _ = execute!(io::stdout(), LeaveAlternateScreen);
         orig_hook(panic_info);
     }));
 
@@ -72,8 +72,7 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
+        LeaveAlternateScreen
     )?;
     terminal.show_cursor()?;
 
@@ -140,7 +139,7 @@ where
                                     let _ = execute!(
                                         io::stdout(),
                                         LeaveAlternateScreen,
-                                        DisableMouseCapture
+                                       
                                     );
 
                                     let editor = std::env::var("EDITOR")
@@ -152,8 +151,7 @@ where
                                     let _ = enable_raw_mode();
                                     let _ = execute!(
                                         io::stdout(),
-                                        EnterAlternateScreen,
-                                        EnableMouseCapture
+                                        EnterAlternateScreen
                                     );
                                     let _ = terminal.clear();
 
@@ -304,7 +302,7 @@ where
                                         let _ = execute!(
                                             io::stdout(),
                                             LeaveAlternateScreen,
-                                            DisableMouseCapture
+                                           
                                         );
 
                                         if let Ok(Some(edited)) =
@@ -318,8 +316,7 @@ where
                                         let _ = enable_raw_mode();
                                         let _ = execute!(
                                             io::stdout(),
-                                            EnterAlternateScreen,
-                                            EnableMouseCapture
+                                            EnterAlternateScreen
                                         );
                                         let _ = terminal.clear();
                                     } else {
@@ -347,7 +344,7 @@ where
                                 let _ = execute!(
                                     io::stdout(),
                                     LeaveAlternateScreen,
-                                    DisableMouseCapture
+                                   
                                 );
 
                                 let editor =
@@ -364,8 +361,7 @@ where
                                 let _ = enable_raw_mode();
                                 let _ = execute!(
                                     io::stdout(),
-                                    EnterAlternateScreen,
-                                    EnableMouseCapture
+                                    EnterAlternateScreen
                                 );
                                 let _ = terminal.clear();
                             }
@@ -789,7 +785,7 @@ pub fn start_execution_thread(app: &mut App) {
         }
 
     if let Some((checked_paths, customized_paths)) = pending_generation {
-        let _ = tx.send(crate::executing::ExecutionEvent::Log("\x1b[1;36m[1/3] Generating Output GitOps Directory...\x1b[0m".to_string()));
+        let _ = tx.send(crate::executing::ExecutionEvent::Log("[1/3] Generating Output GitOps Directory...".to_string()));
         if let Ok(git_mgr) = crate::git::GitManager::new(&config.template_repo_url) {
             let expanded_gitops_path = if config.gitops_dir_path.starts_with("~/") {
                 if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf())
@@ -812,20 +808,20 @@ pub fn start_execution_thread(app: &mut App) {
                 &checked_paths,
                 &customized_paths,
             ) {
-                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mError generating: {:?}\x1b[0m", e)));
+                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("ERROR generating: {:?}", e)));
             } else {
                 let _ = tx.send(crate::executing::ExecutionEvent::Log(format!(
-                    "\x1b[1;32m✓ Successfully generated GitOps directory at {}\x1b[0m",
+                    "✓ Successfully generated GitOps directory at {}",
                     expanded_gitops_path
                 )));
                 if true {
                     if init_git {
-                        let _ = tx.send(crate::executing::ExecutionEvent::Log("\x1b[1;36m[2/3] Initializing Git Repository & Pushing to Remote...\x1b[0m".to_string()));
+                        let _ = tx.send(crate::executing::ExecutionEvent::Log("[2/3] Initializing Git Repository & Pushing to Remote...".to_string()));
                         let target_dir = std::path::Path::new(&expanded_gitops_path);
 
 
                         if ssh_key.is_empty() {
-                            let _ = tx.send(crate::executing::ExecutionEvent::Log("\x1b[1;31mERROR: Git SSH Key Path is required for pushing to remote and bootstrapping.\x1b[0m".to_string()));
+                            let _ = tx.send(crate::executing::ExecutionEvent::Log("ERROR: Git SSH Key Path is required for pushing to remote and bootstrapping.".to_string()));
                             { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
                         }
 
@@ -837,11 +833,11 @@ pub fn start_execution_thread(app: &mut App) {
                         match init_output {
                             Ok(out) if !out.status.success() => {
                                 let stderr = String::from_utf8_lossy(&out.stderr);
-                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to initialize git repository:\n{}\x1b[0m", stderr.trim())));
+                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("ERROR: Failed to initialize git repository:\n{}", stderr.trim())));
                                 { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
                             }
                             Err(e) => {
-                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to execute git init: {}\x1b[0m", e)));
+                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("ERROR: Failed to execute git init: {}", e)));
                                 { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
                             }
                             _ => {}
@@ -855,11 +851,11 @@ pub fn start_execution_thread(app: &mut App) {
                         match add_output {
                             Ok(out) if !out.status.success() => {
                                 let stderr = String::from_utf8_lossy(&out.stderr);
-                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to add files to git repository:\n{}\x1b[0m", stderr.trim())));
+                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("ERROR: Failed to add files to git repository:\n{}", stderr.trim())));
                                 { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
                             }
                             Err(e) => {
-                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to execute git add: {}\x1b[0m", e)));
+                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("ERROR: Failed to execute git add: {}", e)));
                                 { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
                             }
                             _ => {}
@@ -876,14 +872,14 @@ pub fn start_execution_thread(app: &mut App) {
                                 let stderr = String::from_utf8_lossy(&out.stderr);
                                 let stdout = String::from_utf8_lossy(&out.stdout);
                                 if stdout.contains("nothing to commit") || stderr.contains("nothing to commit") {
-                                    let _ = tx.send(crate::executing::ExecutionEvent::Log("\x1b[1;33mℹ Nothing to commit (working tree clean).\x1b[0m".to_string()));
+                                    let _ = tx.send(crate::executing::ExecutionEvent::Log("ℹ Nothing to commit (working tree clean).".to_string()));
                                 } else {
-                                    let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to commit to git repository:\n{}\x1b[0m", stderr.trim())));
+                                    let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("ERROR: Failed to commit to git repository:\n{}", stderr.trim())));
                                     { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
                                 }
                             }
                             Err(e) => {
-                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to execute git commit: {}\x1b[0m", e)));
+                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("ERROR: Failed to execute git commit: {}", e)));
                                 { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
                             }
                             _ => {}
@@ -955,22 +951,22 @@ pub fn start_execution_thread(app: &mut App) {
                         }
 
                         if let Err(e) = run_interactive_cmd(push_cmd, "git push", &tx, &input_rx) {
-                            let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: {}\x1b[0m", e)));
+                            let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("ERROR: {}", e)));
                             let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into()));
                             return;
                         }
 
                         let _ = tx.send(crate::executing::ExecutionEvent::Log(format!(
-                            "\x1b[1;32m✓ Git initialized and pushed to remote branch '{}'\x1b[0m",
+                            "✓ Git initialized and pushed to remote branch '{}'",
                             initial_branch
                         )));
                     }
 
                     if bootstrap_flux {
-                        let _ = tx.send(crate::executing::ExecutionEvent::Log("\x1b[1;36m[3/3] Bootstrapping Flux...\x1b[0m".to_string()));
+                        let _ = tx.send(crate::executing::ExecutionEvent::Log("[3/3] Bootstrapping Flux...".to_string()));
 
                         if ssh_key.is_empty() {
-                            let _ = tx.send(crate::executing::ExecutionEvent::Log("\x1b[1;31mERROR: Git SSH Key Path is required for bootstrapping.\x1b[0m".to_string()));
+                            let _ = tx.send(crate::executing::ExecutionEvent::Log("ERROR: Git SSH Key Path is required for bootstrapping.".to_string()));
                             { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
                         }
 
@@ -1019,7 +1015,8 @@ pub fn start_execution_thread(app: &mut App) {
                                 .arg("git")
                                 .arg(format!("--url={}", flux_git_url))
                                 .arg(format!("--branch={}", branch))
-                                .arg(format!("--path={}", path));
+                                .arg(format!("--path={}", path))
+                                .arg("--runtime-config=batch/v2alpha1");
 
                             if git_url.starts_with("http://") || git_url.starts_with("https://") {
                                 flux_cmd.arg("--allow-insecure-http=true");
@@ -1033,11 +1030,11 @@ pub fn start_execution_thread(app: &mut App) {
                             }
 
                             if let Err(e) = run_interactive_cmd(flux_cmd, "flux bootstrap", &tx, &input_rx) {
-                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: {}\x1b[0m", e)));
+                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("ERROR: {}", e)));
                                 let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into()));
                                 return;
                             }
-                            let _ = tx.send(crate::executing::ExecutionEvent::Log("\x1b[1;32m✓ Flux bootstrap completed successfully\x1b[0m".to_string()));
+                            let _ = tx.send(crate::executing::ExecutionEvent::Log("✓ Flux bootstrap completed successfully".to_string()));
                     }
                 }
             }

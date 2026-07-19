@@ -102,25 +102,54 @@ impl ExecutingState {
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
         let block = Block::default().borders(Borders::ALL).title(" Execution Log ");
         
-        let mut text = String::new();
+        let mut ui_lines = Vec::new();
         for log in &self.logs {
-            text.push_str(log);
-            text.push('\n');
+            if log.starts_with("ERROR:") || log.starts_with("Error") {
+                ui_lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+                    log, ratatui::style::Style::default().fg(ratatui::style::Color::Red).add_modifier(ratatui::style::Modifier::BOLD)
+                )));
+            } else if log.starts_with("✓") {
+                ui_lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+                    log, ratatui::style::Style::default().fg(ratatui::style::Color::Green).add_modifier(ratatui::style::Modifier::BOLD)
+                )));
+            } else if log.starts_with("[1/3]") || log.starts_with("[2/3]") || log.starts_with("[3/3]") {
+                ui_lines.push(ratatui::text::Line::from(ratatui::text::Span::styled(
+                    log, ratatui::style::Style::default().fg(ratatui::style::Color::Cyan).add_modifier(ratatui::style::Modifier::BOLD)
+                )));
+            } else if let Some(idx) = log.find("[y/N] ") {
+                let prefix = &log[..idx];
+                let prompt = "[y/N] ";
+                let user_input = &log[idx + prompt.len()..];
+                
+                ui_lines.push(ratatui::text::Line::from(vec![
+                    ratatui::text::Span::raw(prefix),
+                    ratatui::text::Span::styled(prompt, ratatui::style::Style::default().fg(ratatui::style::Color::Yellow).add_modifier(ratatui::style::Modifier::BOLD)),
+                    ratatui::text::Span::styled(user_input, ratatui::style::Style::default().fg(ratatui::style::Color::Green).add_modifier(ratatui::style::Modifier::BOLD)),
+                ]));
+            } else {
+                ui_lines.push(ratatui::text::Line::from(log.as_str()));
+            }
         }
 
         if let Some(ref err) = self.error {
-            text.push_str("\n\x1b[1;31m[ERROR]\x1b[0m\n");
-            text.push_str(err);
-            text.push_str("\n\nPress ESC or 'b' to go back and retry.");
+            ui_lines.push(ratatui::text::Line::from(""));
+            ui_lines.push(ratatui::text::Line::from(ratatui::text::Span::styled("[ERROR]", ratatui::style::Style::default().fg(ratatui::style::Color::Red).add_modifier(ratatui::style::Modifier::BOLD))));
+            ui_lines.push(ratatui::text::Line::from(err.as_str()));
+            ui_lines.push(ratatui::text::Line::from(""));
+            ui_lines.push(ratatui::text::Line::from("Press ESC or 'b' to go back and retry."));
         } else if self.is_done {
-            text.push_str("\n\x1b[1;32m[SUCCESS]\x1b[0m\n");
-            text.push_str("All operations completed successfully!\n\nPress Enter or 'q' to quit.");
+            ui_lines.push(ratatui::text::Line::from(""));
+            ui_lines.push(ratatui::text::Line::from(ratatui::text::Span::styled("[SUCCESS]", ratatui::style::Style::default().fg(ratatui::style::Color::Green).add_modifier(ratatui::style::Modifier::BOLD))));
+            ui_lines.push(ratatui::text::Line::from("All operations completed successfully!"));
+            ui_lines.push(ratatui::text::Line::from(""));
+            ui_lines.push(ratatui::text::Line::from("Press Enter or 'q' to quit."));
         } else {
-            text.push_str("\n\x1b[1;33m[RUNNING...]\x1b[0m\n");
+            ui_lines.push(ratatui::text::Line::from(""));
+            ui_lines.push(ratatui::text::Line::from(ratatui::text::Span::styled("[RUNNING...]", ratatui::style::Style::default().fg(ratatui::style::Color::Yellow).add_modifier(ratatui::style::Modifier::BOLD))));
         }
 
         // Auto-scroll to bottom
-        let num_lines = text.lines().count();
+        let num_lines = ui_lines.len();
         let height = area.height as usize;
         let scroll = if num_lines > height {
             (num_lines - height + 2) as u16
@@ -128,7 +157,7 @@ impl ExecutingState {
             0
         };
 
-        let p = Paragraph::new(text)
+        let p = Paragraph::new(ui_lines)
             .block(block)
             .wrap(Wrap { trim: true })
             .scroll((scroll, 0));
