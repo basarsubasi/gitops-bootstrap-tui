@@ -193,7 +193,7 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                             initial_branch
                         );
 
-                        if actions.init_git {
+                        if actions.git_daemon {
                             // Spawn git daemon detached
                             println!("\x1b[1;36m[2.5/3] Spawning Git Daemon...\x1b[0m");
                             
@@ -736,7 +736,8 @@ where
                             if trigger == "Next" {
                                 // Save the preferences back to AppConfig!
                                 if let View::Actions(ref owned_actions) = app.view {
-                                    app.config.init_git_daemon = owned_actions.init_git;
+                                    app.config.init_git = owned_actions.init_git;
+                                    app.config.git_daemon = owned_actions.git_daemon;
                                     app.config.git_http_server = owned_actions.git_http_server;
                                     app.config.bootstrap_flux = owned_actions.bootstrap_flux;
                                     if let Some(modal) = &owned_actions.flux_modal {

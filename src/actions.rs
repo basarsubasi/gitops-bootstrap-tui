@@ -124,6 +124,7 @@ impl ModalState {
 
 pub struct ActionsState {
     pub init_git: bool,
+    pub git_daemon: bool,
     pub git_http_server: bool,
     pub bootstrap_flux: bool,
     pub list_state: ListState,
@@ -138,7 +139,8 @@ impl ActionsState {
         let mut list_state = ListState::default();
         list_state.select(Some(0));
         let mut state = Self {
-            init_git: config.init_git_daemon,
+            init_git: config.init_git,
+            git_daemon: config.git_daemon,
             git_http_server: config.git_http_server,
             bootstrap_flux: config.bootstrap_flux,
             list_state,
@@ -201,8 +203,8 @@ impl ActionsState {
                     match self.focus {
                         ActionsFocus::List => {
                             if let Some(i) = self.list_state.selected() {
-                                if i == 0 {
-                                    self.list_state.select(Some(1));
+                                if i < 3 {
+                                    self.list_state.select(Some(i + 1));
                                 } else {
                                     self.focus = ActionsFocus::Next; // Move to Next
                                     self.list_state.select(None);
@@ -220,20 +222,20 @@ impl ActionsState {
                 KeyCode::Up | KeyCode::Char('k') | KeyCode::BackTab => match self.focus {
                     ActionsFocus::List => {
                         if let Some(i) = self.list_state.selected() {
-                            if i == 1 {
-                                self.list_state.select(Some(0));
+                            if i > 0 {
+                                self.list_state.select(Some(i - 1));
                             } else {
                                 self.focus = ActionsFocus::Previous;
                                 self.list_state.select(None);
                             }
                         } else {
-                            self.list_state.select(Some(1));
+                            self.list_state.select(Some(3));
                         }
                     }
                     ActionsFocus::Previous => self.focus = ActionsFocus::Next,
                     ActionsFocus::Next => {
                         self.focus = ActionsFocus::List;
-                        self.list_state.select(Some(1));
+                        self.list_state.select(Some(3));
                     }
                     _ => {}
                 },
@@ -268,13 +270,18 @@ impl ActionsState {
                             }
                             self.sync_flux_url();
                         } else if i == 1 {
-                            self.git_http_server = !self.git_http_server;
-                            if self.git_http_server {
-                                // Re-use the git modal or handle HTTP port? We will use a separate modal later or just put it in Git Modal.
+                            self.git_daemon = !self.git_daemon;
+                            if self.git_daemon {
                                 self.focus = ActionsFocus::ModalGit;
                             }
                             self.sync_flux_url();
                         } else if i == 2 {
+                            self.git_http_server = !self.git_http_server;
+                            if self.git_http_server {
+                                self.focus = ActionsFocus::ModalGit;
+                            }
+                            self.sync_flux_url();
+                        } else if i == 3 {
                             self.bootstrap_flux = !self.bootstrap_flux;
                             if self.bootstrap_flux {
                                 self.focus = ActionsFocus::ModalFlux;
@@ -286,9 +293,9 @@ impl ActionsState {
                     if self.focus == ActionsFocus::List
                         && let Some(i) = self.list_state.selected()
                     {
-                        if (i == 0 && self.init_git) || (i == 1 && self.git_http_server) {
+                        if (i == 0 && self.init_git) || (i == 1 && self.git_daemon) || (i == 2 && self.git_http_server) {
                             self.focus = ActionsFocus::ModalGit;
-                        } else if i == 2 && self.bootstrap_flux {
+                        } else if i == 3 && self.bootstrap_flux {
                             self.focus = ActionsFocus::ModalFlux;
                         }
                     }
@@ -306,15 +313,25 @@ impl ActionsState {
             .split(area);
 
         let git_box = if self.init_git { "[x]" } else { "[ ]" };
+        let daemon_box = if self.git_daemon { "[x]" } else { "[ ]" };
         let http_box = if self.git_http_server { "[x]" } else { "[ ]" };
         let flux_box = if self.bootstrap_flux { "[x]" } else { "[ ]" };
 
         let items = vec![
             ListItem::new(Span::raw(format!(
-                "{} Initialize Git and Git Daemon{}",
+                "{} Initialize Git Repository{}",
                 git_box,
                 if self.init_git {
                     " (Press 'e' to configure)"
+                } else {
+                    ""
+                }
+            ))),
+            ListItem::new(Span::raw(format!(
+                "{} Spawn Git Daemon{}",
+                daemon_box,
+                if self.git_daemon {
+                    " (Press 'e' to configure address)"
                 } else {
                     ""
                 }

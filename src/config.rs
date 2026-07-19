@@ -10,7 +10,9 @@ pub struct AppConfig {
 
     // Post-generation actions defaults
     #[serde(default)]
-    pub init_git_daemon: bool,
+    pub init_git: bool,
+    #[serde(default)]
+    pub git_daemon: bool,
     #[serde(default)]
     pub bootstrap_flux: bool,
 
@@ -38,17 +40,18 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            template_repo_url: "".to_string(),
-            base_dir_path: "".to_string(),
+            template_repo_url: "https://github.com/basarsubasi/flux-templates.git".to_string(),
+            base_dir_path: "bases".to_string(),
             gitops_dir_path: "~/my-gitops-repo".to_string(),
             new_cluster_name: "my-cluster".to_string(),
-            init_git_daemon: true,
-            bootstrap_flux: false,
+            init_git: true,
+            git_daemon: false,
+            bootstrap_flux: true,
             git_daemon_address: "127.0.0.1".to_string(),
             git_branch: "main".to_string(),
-            git_http_server: false,
+            git_http_server: true,
             git_http_server_port: 8080,
-            flux_git_url: "git://127.0.0.1/".to_string(),
+            flux_git_url: "http://127.0.0.1:8080/".to_string(),
             flux_git_branch: "main".to_string(),
             flux_kubeconfig: "~/.kube/config".to_string(),
             flux_ssh_key_path: "".to_string(),
