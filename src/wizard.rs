@@ -99,9 +99,9 @@ impl WizardState {
                 }
                 KeyCode::Enter => {
                     if self.current_input == self.inputs.len() {
-                        self.action = WizardAction::Previous;
-                    } else if self.current_input == self.inputs.len() + 1 {
                         self.action = WizardAction::Next;
+                    } else if self.current_input == self.inputs.len() + 1 {
+                        self.action = WizardAction::Previous;
                     } else {
                         self.current_input += 1;
                     }
@@ -197,8 +197,8 @@ impl WizardState {
         }
 
         // Render Buttons
-        let prev_idx = self.inputs.len();
-        let next_idx = self.inputs.len() + 1;
+        let next_idx = self.inputs.len();
+        let prev_idx = self.inputs.len() + 1;
 
         let prev_style = if self.current_input == prev_idx {
             Style::default()
