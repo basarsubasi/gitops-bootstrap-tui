@@ -90,6 +90,11 @@ impl ExplorerState {
                     .to_string_lossy()
                     .to_string();
 
+                // Hide the centralized 'repositories' layer from the UI
+                if name == "repositories" && depth == 0 {
+                    continue;
+                }
+
                 let mut is_leaf = false;
                 let mut is_helm = false;
                 if let Ok(dir_entries) = fs::read_dir(&path) {

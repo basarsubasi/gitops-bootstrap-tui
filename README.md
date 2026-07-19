@@ -15,22 +15,16 @@ Default template and the expected directory structure can be found at the [https
 You can also use your own templates, by creating a similar structure in a directory and providing the path to the `gitops-bootstrap-tui`.
 
 ### Generated GitOps Output Structure
-When you generate a cluster using the TUI, it intelligently creates the following layered GitOps structure optimized for Kustomize and Flux dependencies:
+When you generate a cluster using the TUI, it creates the following standard Kustomize structure:
 
 ```text
 .
 ├── bases/                             # Copied from templates
 └── <cluster-name>/                    # Your generated GitOps directory
-    ├── flux-system/                   # Flux CD core controllers & syncs
-    │   ├── gotk-components.yaml
-    │   ├── gotk-sync.yaml
-    │   ├── sync-repositories.yaml     # Priority 1
-    │   ├── sync-infrastructure.yaml   # Priority 2
-    │   └── sync-apps.yaml             # Priority 3
+    ├── kustomization.yaml             # Main kustomization combining all components
     ├── repositories/                  # Centralized HelmRepositories
     │   └── kustomization.yaml
-    ├── infrastructure/                # Layer Kustomization
-    │   ├── kustomization.yaml
+    ├── infrastructure/
     │   └── networking/
     │       └── cilium/
     │           ├── kustomization.yaml # Points to bases
@@ -44,8 +38,7 @@ When you generate a cluster using the TUI, it intelligently creates the followin
 - **Interactive Wizard**: A guided wizard to gather essential bootstrap configuration (Base Directory, Cluster Name, Git URL, etc.).
 - **Component Explorer**: A navigable tree view to explore, enable, and disable Helm releases and GitOps components before generation.
 - **Value Customization**: You can customize the default helm chart values before generating the templates.
-- **Layer-Based GitOps Generation**: Dynamically groups selected components into layers (`infrastructure`, `databases`, `apps`) and constructs isolated Kustomize trees to prevent merge conflicts and duplicate definitions.
-- **Native Flux Prioritization**: Automatically generates Flux `Kustomization` sync manifests (`sync-infrastructure.yaml`, etc.) packed with `dependsOn` configurations to ensure a robust, prioritized deployment lifecycle.
+- **Deduplicated GitOps Generation**: Dynamically constructs isolated Kustomize trees and automatically prevents duplicate HelmRepository declarations.
 - **Post-Generation Actions**:
   - Automatically initialize a local Git repository, natively pull existing commits (resolving conflicts by preferring remote versions), and commit the bootstrapped structure.
   - Seamlessly push generated manifests to any standard remote Git provider (GitHub, GitLab, Gitea, Bitbucket) using SSH keys or HTTP tokens.

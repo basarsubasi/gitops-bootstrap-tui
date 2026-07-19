@@ -35,19 +35,12 @@ pub fn finalize_generation(
         copy_dir_recursive(&source_bases, &target_bases)?;
     }
 
-    let mut layer_resources: HashMap<String, Vec<String>> = HashMap::new();
+    let mut root_kustomization_resources = Vec::new();
 
     // 2. Generate cluster overrides for each checked component
     for rel_path_str in checked_paths {
         let rel_path = Path::new(rel_path_str);
         
-        let components: Vec<_> = rel_path.components().map(|c| c.as_os_str().to_string_lossy().to_string()).collect();
-        if components.is_empty() { continue; }
-        
-        let top_layer = components[0].clone();
-        let sub_path = components[1..].join("/");
-        layer_resources.entry(top_layer).or_default().push(sub_path);
-
         let cluster_component_dir = target_cluster.join(rel_path);
         fs::create_dir_all(&cluster_component_dir)?;
 
@@ -76,76 +69,29 @@ pub fn finalize_generation(
 
         let kust_file_path = cluster_component_dir.join("kustomization.yaml");
         fs::write(&kust_file_path, kustomization_content)?;
+
+        // Add to root kustomization
+        root_kustomization_resources.push(format!("- {}", rel_path_str));
     }
 
-    // 3. Manually add repositories layer
+    // 3. Generate repositories layer explicitly
     let repo_cluster_dir = target_cluster.join("repositories");
     fs::create_dir_all(&repo_cluster_dir)?;
     fs::write(
         repo_cluster_dir.join("kustomization.yaml"),
         "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - ../../bases/repositories\n"
     )?;
+    root_kustomization_resources.push("- repositories".to_string());
 
-    // 4. Generate Layer kustomization.yamls
-    for (layer, resources) in &layer_resources {
-        let layer_dir = target_cluster.join(layer);
-        let kust_path = layer_dir.join("kustomization.yaml");
-        let formatted_resources = resources.iter().map(|r| format!("  - {}", r)).collect::<Vec<_>>().join("\n");
-        let content = format!("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n{}\n", formatted_resources);
-        fs::write(&kust_path, content)?;
-    }
-
-    // 5. Generate flux-system sync manifests with priorities
-    let flux_system_dir = target_cluster.join("flux-system");
-    fs::create_dir_all(&flux_system_dir)?;
-
-    let mut sync_resources = Vec::new();
-
-    // Priority 1: repositories
-    sync_resources.push("sync-repositories.yaml".to_string());
-    fs::write(
-        flux_system_dir.join("sync-repositories.yaml"),
-        format!("apiVersion: kustomize.toolkit.fluxcd.io/v1\nkind: Kustomization\nmetadata:\n  name: cluster-repositories\n  namespace: flux-system\nspec:\n  interval: 10m\n  path: ./{}/{}/repositories\n  prune: true\n  sourceRef:\n    kind: GitRepository\n    name: flux-system\n", base_dir_path, new_cluster_name).replace("bases/", "clusters/")
-    )?;
-
-    // Make sure we define layers properly
-    let order = ["infrastructure", "databases", "apps"];
-    let mut existing_layers = Vec::new();
-    for l in order.iter() {
-        if layer_resources.contains_key(*l) {
-            existing_layers.push(l.to_string());
-        }
-    }
-    // Add any other dynamic layers the user selected
-    for l in layer_resources.keys() {
-        if !order.contains(&l.as_str()) {
-            existing_layers.push(l.to_string());
-        }
-    }
-
-    // Priority 2+: ordered layers
-    let mut prev_dependency = "cluster-repositories".to_string();
-    
-    for layer in existing_layers {
-        let name = format!("cluster-{}", layer);
-        sync_resources.push(format!("sync-{}.yaml", layer));
-        
-        let content = format!(
-            "apiVersion: kustomize.toolkit.fluxcd.io/v1\nkind: Kustomization\nmetadata:\n  name: {}\n  namespace: flux-system\nspec:\n  dependsOn:\n    - name: {}\n  interval: 10m\n  path: ./{}/{}/{}\n  prune: true\n  sourceRef:\n    kind: GitRepository\n    name: flux-system\n",
-            name, prev_dependency, "clusters", new_cluster_name, layer
+    // 4. Generate root kustomization.yaml
+    if !root_kustomization_resources.is_empty() {
+        let root_kust_path = target_cluster.join("kustomization.yaml");
+        let root_kust_content = format!(
+            "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n{}\n",
+            root_kustomization_resources.join("\n")
         );
-        fs::write(flux_system_dir.join(format!("sync-{}.yaml", layer)), content)?;
-        
-        // Next layer depends on this one
-        prev_dependency = name;
+        fs::write(&root_kust_path, root_kust_content)?;
     }
-
-    // Create flux-system/kustomization.yaml
-    let flux_kust_content = format!(
-        "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n{}\n",
-        sync_resources.iter().map(|r| format!("  - {}", r)).collect::<Vec<_>>().join("\n")
-    );
-    fs::write(flux_system_dir.join("kustomization.yaml"), flux_kust_content)?;
 
     Ok(())
 }
@@ -192,7 +138,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn test_finalize_generation_layers_and_priorities() {
+    fn test_finalize_generation_monolithic() {
         let cache_dir = tempdir().unwrap();
         let target_dir = tempdir().unwrap();
 
@@ -219,28 +165,10 @@ mod tests {
 
         let cluster_path = target_dir.path().join("test-cluster");
         
-        // Verify infrastructure layer kustomization exists and contains cilium
-        let infra_kust = fs::read_to_string(cluster_path.join("infrastructure/kustomization.yaml")).unwrap();
-        assert!(infra_kust.contains("- networking/cilium"));
-
-        // Verify apps layer kustomization exists
-        let apps_kust = fs::read_to_string(cluster_path.join("apps/kustomization.yaml")).unwrap();
-        assert!(apps_kust.contains("- my-app"));
-
-        // Verify flux-system sync priority manifests
-        let sync_repos = fs::read_to_string(cluster_path.join("flux-system/sync-repositories.yaml")).unwrap();
-        assert!(sync_repos.contains("name: cluster-repositories"));
-
-        let sync_infra = fs::read_to_string(cluster_path.join("flux-system/sync-infrastructure.yaml")).unwrap();
-        assert!(sync_infra.contains("dependsOn:\n    - name: cluster-repositories"));
-
-        let sync_apps = fs::read_to_string(cluster_path.join("flux-system/sync-apps.yaml")).unwrap();
-        assert!(sync_apps.contains("dependsOn:\n    - name: cluster-infrastructure"));
-
-        // Verify root kustomization contains all sync files
-        let root_kust = fs::read_to_string(cluster_path.join("flux-system/kustomization.yaml")).unwrap();
-        assert!(root_kust.contains("- sync-repositories.yaml"));
-        assert!(root_kust.contains("- sync-infrastructure.yaml"));
-        assert!(root_kust.contains("- sync-apps.yaml"));
+        // Verify root kustomization contains all paths including repositories
+        let root_kust = fs::read_to_string(cluster_path.join("kustomization.yaml")).unwrap();
+        assert!(root_kust.contains("- infrastructure/networking/cilium"));
+        assert!(root_kust.contains("- apps/my-app"));
+        assert!(root_kust.contains("- repositories"));
     }
 }
