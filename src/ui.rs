@@ -294,7 +294,7 @@ where
                                         let initial_values =
                                             match state.customized_paths.get(&item.path) {
                                                 Some(v) => v.clone(),
-                                                None => crate::helm::fetch_helm_values(&full_path)
+                                                None => crate::helm::fetch_helm_values(&full_path, &state.root_path)
                                                     .unwrap_or_default(),
                                             };
 

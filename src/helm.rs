@@ -3,23 +3,12 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-pub fn fetch_helm_values(component_dir: &Path) -> Result<String, String> {
-    let repo_path = component_dir.join("helm-repo.yaml");
+pub fn fetch_helm_values(component_dir: &Path, root_path: &Path) -> Result<String, String> {
     let release_path = component_dir.join("helm-release.yaml");
 
-    if !repo_path.exists() || !release_path.exists() {
-        return Err("Missing helm-repo.yaml or helm-release.yaml".to_string());
+    if !release_path.exists() {
+        return Err("Missing helm-release.yaml".to_string());
     }
-
-    let repo_content = fs::read_to_string(&repo_path).map_err(|e| e.to_string())?;
-    let repo_yaml: Value = serde_yaml::from_str(&repo_content)
-        .map_err(|e| format!("Failed to parse helm-repo.yaml: {}", e))?;
-
-    let url = repo_yaml
-        .get("spec")
-        .and_then(|s| s.get("url"))
-        .and_then(|u| u.as_str())
-        .ok_or("Could not find spec.url in helm-repo.yaml")?;
 
     let release_content = fs::read_to_string(&release_path).map_err(|e| e.to_string())?;
     let release_yaml: Value = serde_yaml::from_str(&release_content)
@@ -31,10 +20,27 @@ pub fn fetch_helm_values(component_dir: &Path) -> Result<String, String> {
         .and_then(|c| c.get("spec"))
         .ok_or("Could not find spec.chart.spec in helm-release.yaml")?;
 
-    let chart_name = chart_spec
-        .get("chart")
-        .and_then(|c| c.as_str())
-        .ok_or("Could not find chart name")?;
+    let repo_name = chart_spec
+        .get("sourceRef")
+        .and_then(|s| s.get("name"))
+        .and_then(|n| n.as_str())
+        .ok_or("Could not find sourceRef.name in helm-release.yaml")?;
+
+    let repo_path = root_path.join("repositories").join(format!("{}.yaml", repo_name));
+    
+    if !repo_path.exists() {
+        return Err(format!("Missing repository file: {}", repo_path.display()));
+    }
+
+    let repo_content = fs::read_to_string(&repo_path).map_err(|e| e.to_string())?;
+    let repo_yaml: Value = serde_yaml::from_str(&repo_content)
+        .map_err(|e| format!("Failed to parse {}.yaml: {}", repo_name, e))?;
+
+    let url = repo_yaml
+        .get("spec")
+        .and_then(|s| s.get("url"))
+        .and_then(|u| u.as_str())
+        .ok_or(format!("Could not find spec.url in {}.yaml", repo_name))?;
 
     let mut cmd = Command::new("helm");
     cmd.arg("show")
