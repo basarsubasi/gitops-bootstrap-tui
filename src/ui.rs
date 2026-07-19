@@ -1015,10 +1015,8 @@ pub fn start_execution_thread(app: &mut App) {
                                 .arg("git")
                                 .arg(format!("--url={}", flux_git_url))
                                 .arg(format!("--branch={}", branch))
-                                .arg(format!("--path={}", path))
-                                .arg("--runtime-config=batch/v2alpha1");
-
-                            if git_url.starts_with("http://") || git_url.starts_with("https://") {
+                                .arg(format!("--path={}", path));
+                            if git_url.starts_with("http://") {
                                 flux_cmd.arg("--allow-insecure-http=true");
                             }
 
