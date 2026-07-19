@@ -268,7 +268,7 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
 
                                 let mut router_cmd = std::process::Command::new("git-http-router");
                                 router_cmd.arg("--port").arg(http_port);
-                                router_cmd.arg("--root").arg(".");
+                                router_cmd.arg("--root").arg(&expanded_path);
                                 if !http_username.is_empty() {
                                     router_cmd.arg("--username").arg(http_username);
                                 }
@@ -360,11 +360,10 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                         };
 
                         let run_flux_cmd = |mut cmd: std::process::Command, name: &str| {
-                            match cmd.output() {
-                                Ok(output) => {
-                                    if !output.status.success() {
-                                        let stderr = String::from_utf8_lossy(&output.stderr);
-                                        println!("\x1b[1;31mERROR: {} failed (exit code {}):\n{}\x1b[0m", name, output.status, stderr.trim());
+                            match cmd.status() {
+                                Ok(status) => {
+                                    if !status.success() {
+                                        println!("\x1b[1;31mERROR: {} failed (exit code {})\x1b[0m", name, status);
                                         std::process::exit(1);
                                     }
                                 }
