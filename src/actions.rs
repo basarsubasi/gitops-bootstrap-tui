@@ -137,7 +137,7 @@ impl ActionsState {
     pub fn new(config: &crate::config::AppConfig) -> Self {
         let mut list_state = ListState::default();
         list_state.select(Some(0));
-        Self {
+        let mut state = Self {
             init_git: config.init_git_daemon,
             git_http_server: config.git_http_server,
             bootstrap_flux: config.bootstrap_flux,
@@ -146,6 +146,27 @@ impl ActionsState {
             flux_modal: Some(ModalState::new_flux(config)),
             git_modal: Some(ModalState::new_git(config)),
             action_trigger: None,
+        };
+        state.sync_flux_url();
+        state
+    }
+
+    fn sync_flux_url(&mut self) {
+        if let (Some(git_modal), Some(flux_modal)) = (&self.git_modal, &mut self.flux_modal) {
+            let new_url = if self.git_http_server {
+                let port = git_modal.inputs[2].value();
+                format!("http://127.0.0.1:{}/", port)
+            } else {
+                let addr = git_modal.inputs[0].value();
+                format!("git://{}/", addr)
+            };
+            
+            let current_url = flux_modal.inputs[0].value();
+            if current_url.starts_with("git://") || current_url.starts_with("http://127.0.0.1") {
+                flux_modal.inputs[0] = tui_input::Input::default()
+                    .with_value(new_url.clone())
+                    .with_cursor(new_url.chars().count());
+            }
         }
     }
 
@@ -161,11 +182,15 @@ impl ActionsState {
         }
 
         if self.focus == ActionsFocus::ModalGit {
+            let mut closed = false;
             if let Some(modal) = &mut self.git_modal {
-                let closed = modal.handle_event(event);
+                closed = modal.handle_event(event);
                 if closed {
                     self.focus = ActionsFocus::List;
                 }
+            }
+            if closed {
+                self.sync_flux_url();
             }
             return false;
         }
@@ -241,12 +266,14 @@ impl ActionsState {
                             if self.init_git {
                                 self.focus = ActionsFocus::ModalGit;
                             }
+                            self.sync_flux_url();
                         } else if i == 1 {
                             self.git_http_server = !self.git_http_server;
                             if self.git_http_server {
                                 // Re-use the git modal or handle HTTP port? We will use a separate modal later or just put it in Git Modal.
                                 self.focus = ActionsFocus::ModalGit;
                             }
+                            self.sync_flux_url();
                         } else if i == 2 {
                             self.bootstrap_flux = !self.bootstrap_flux;
                             if self.bootstrap_flux {
