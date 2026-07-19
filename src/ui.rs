@@ -127,35 +127,59 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                             .map(|m| m.inputs[0].value())
                             .unwrap_or("127.0.0.1");
 
-                        let init_status = std::process::Command::new("git")
+                        let init_output = std::process::Command::new("git")
                             .arg("init")
                             .arg(format!("--initial-branch={}", initial_branch))
                             .current_dir(target_dir)
-                            .status();
-                        if init_status.is_err() || !init_status.unwrap().success() {
-                            println!("\x1b[1;31mERROR: Failed to initialize git repository\x1b[0m");
-                            std::process::exit(1);
+                            .output();
+                        match init_output {
+                            Ok(out) if !out.status.success() => {
+                                let stderr = String::from_utf8_lossy(&out.stderr);
+                                println!("\x1b[1;31mERROR: Failed to initialize git repository:\n{}\x1b[0m", stderr.trim());
+                                std::process::exit(1);
+                            }
+                            Err(e) => {
+                                println!("\x1b[1;31mERROR: Failed to execute git init: {}\x1b[0m", e);
+                                std::process::exit(1);
+                            }
+                            _ => {}
                         }
 
-                        let add_status = std::process::Command::new("git")
+                        let add_output = std::process::Command::new("git")
                             .arg("add")
                             .arg(".")
                             .current_dir(target_dir)
-                            .status();
-                        if add_status.is_err() || !add_status.unwrap().success() {
-                            println!("\x1b[1;31mERROR: Failed to add files to git repository\x1b[0m");
-                            std::process::exit(1);
+                            .output();
+                        match add_output {
+                            Ok(out) if !out.status.success() => {
+                                let stderr = String::from_utf8_lossy(&out.stderr);
+                                println!("\x1b[1;31mERROR: Failed to add files to git repository:\n{}\x1b[0m", stderr.trim());
+                                std::process::exit(1);
+                            }
+                            Err(e) => {
+                                println!("\x1b[1;31mERROR: Failed to execute git add: {}\x1b[0m", e);
+                                std::process::exit(1);
+                            }
+                            _ => {}
                         }
 
-                        let commit_status = std::process::Command::new("git")
+                        let commit_output = std::process::Command::new("git")
                             .arg("commit")
                             .arg("-m")
                             .arg("Initial GitOps Commit")
                             .current_dir(target_dir)
-                            .status();
-                        if commit_status.is_err() || !commit_status.unwrap().success() {
-                            println!("\x1b[1;31mERROR: Failed to commit to git repository\x1b[0m");
-                            std::process::exit(1);
+                            .output();
+                        match commit_output {
+                            Ok(out) if !out.status.success() => {
+                                let stderr = String::from_utf8_lossy(&out.stderr);
+                                println!("\x1b[1;31mERROR: Failed to commit to git repository:\n{}\x1b[0m", stderr.trim());
+                                std::process::exit(1);
+                            }
+                            Err(e) => {
+                                println!("\x1b[1;31mERROR: Failed to execute git commit: {}\x1b[0m", e);
+                                std::process::exit(1);
+                            }
+                            _ => {}
                         }
 
                         println!(
@@ -227,12 +251,21 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                             flux_cmd.arg(format!("--kubeconfig={}", kubeconfig));
                         }
 
-                        let flux_status = flux_cmd.status();
-                        if flux_status.is_err() || !flux_status.unwrap().success() {
-                            println!("\x1b[1;31mERROR: Flux bootstrap failed\x1b[0m");
-                            std::process::exit(1);
+                        let flux_output = flux_cmd.output();
+                        match flux_output {
+                            Ok(output) => {
+                                if !output.status.success() {
+                                    let stderr = String::from_utf8_lossy(&output.stderr);
+                                    println!("\x1b[1;31mERROR: Flux bootstrap failed (exit code {}):\n{}\x1b[0m", output.status, stderr.trim());
+                                    std::process::exit(1);
+                                }
+                                println!("\x1b[1;32m✓ Flux bootstrap completed successfully\x1b[0m");
+                            }
+                            Err(e) => {
+                                println!("\x1b[1;31mERROR: Failed to execute flux CLI: {}\x1b[0m", e);
+                                std::process::exit(1);
+                            }
                         }
-                        println!("\x1b[1;32m✓ Flux bootstrap completed successfully\x1b[0m");
                     }
                 }
             }
