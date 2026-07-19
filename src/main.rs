@@ -18,6 +18,12 @@ fn check_cli_deps() -> Result<(), String> {
     if Command::new("helm").arg("version").output().is_err() {
         return Err("Required dependency 'helm' is not installed or not in PATH.".to_string());
     }
+    if Command::new("kubectl").arg("version").arg("--client").output().is_err() {
+        return Err("Required dependency 'kubectl' is not installed or not in PATH.".to_string());
+    }
+    if Command::new("flux").arg("--version").output().is_err() {
+        return Err("Required dependency 'flux' is not installed or not in PATH.".to_string());
+    }
     Ok(())
 }
 

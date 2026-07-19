@@ -305,24 +305,79 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                             if let Some(ref arg) = kubeconfig_arg { install_cmd.arg(arg); }
                             run_flux_cmd(install_cmd, "flux install");
 
-                            println!("\x1b[1;36m  -> Creating GitRepository source...\x1b[0m");
-                            let mut source_cmd = std::process::Command::new("flux");
-                            source_cmd.args(["create", "source", "git", "flux-system"])
-                                .arg(format!("--url={}", git_url))
-                                .arg(format!("--branch={}", branch))
-                                .arg("--interval=1m");
-                            if let Some(ref arg) = kubeconfig_arg { source_cmd.arg(arg); }
-                            run_flux_cmd(source_cmd, "flux create source");
+                            println!("\x1b[1;36m  -> Applying GitRepository and Kustomization manifests...\x1b[0m");
+                            
+                            let combined_yaml = format!(r#"
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: flux-system
+  namespace: flux-system
+spec:
+  interval: 1m0s
+  ref:
+    branch: {}
+  url: {}
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: flux-system
+  namespace: flux-system
+spec:
+  interval: 1m0s
+  path: {}
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+"#, branch, git_url, path);
 
-                            println!("\x1b[1;36m  -> Creating Kustomization...\x1b[0m");
-                            let mut kustomize_cmd = std::process::Command::new("flux");
-                            kustomize_cmd.args(["create", "kustomization", "flux-system"])
-                                .arg("--source=GitRepository/flux-system")
-                                .arg(format!("--path={}", path))
-                                .arg("--prune=true")
-                                .arg("--interval=1m");
-                            if let Some(ref arg) = kubeconfig_arg { kustomize_cmd.arg(arg); }
-                            run_flux_cmd(kustomize_cmd, "flux create kustomization");
+                            let mut kubectl_cmd = std::process::Command::new("kubectl");
+                            kubectl_cmd.arg("apply").arg("-f").arg("-");
+                            
+                            if !kubeconfig.is_empty() {
+                                let expanded_kubeconfig = if let Some(stripped) = kubeconfig.strip_prefix("~/") {
+                                    if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
+                                        home.join(stripped).to_string_lossy().to_string()
+                                    } else {
+                                        kubeconfig.to_string()
+                                    }
+                                } else {
+                                    kubeconfig.to_string()
+                                };
+                                kubectl_cmd.arg(format!("--kubeconfig={}", expanded_kubeconfig));
+                            }
+
+                            use std::io::Write;
+                            kubectl_cmd.stdin(std::process::Stdio::piped())
+                                       .stdout(std::process::Stdio::piped())
+                                       .stderr(std::process::Stdio::piped());
+
+                            match kubectl_cmd.spawn() {
+                                Ok(mut child) => {
+                                    if let Some(mut stdin) = child.stdin.take() {
+                                        let _ = stdin.write_all(combined_yaml.as_bytes());
+                                    }
+                                    match child.wait_with_output() {
+                                        Ok(output) => {
+                                            if !output.status.success() {
+                                                let stderr = String::from_utf8_lossy(&output.stderr);
+                                                println!("\x1b[1;31mERROR: kubectl apply failed (exit code {}):\n{}\x1b[0m", output.status, stderr.trim());
+                                                std::process::exit(1);
+                                            }
+                                        }
+                                        Err(e) => {
+                                            println!("\x1b[1;31mERROR: Failed to wait on kubectl: {}\x1b[0m", e);
+                                            std::process::exit(1);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    println!("\x1b[1;31mERROR: Failed to execute kubectl (is it installed?): {}\x1b[0m", e);
+                                    std::process::exit(1);
+                                }
+                            }
 
                             println!("\x1b[1;32m✓ Flux unauthenticated bootstrap completed successfully\x1b[0m");
                         } else {
