@@ -189,43 +189,54 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
 
                         // Spawn git daemon detached
                         println!("\x1b[1;36m[2.5/3] Spawning Git Daemon...\x1b[0m");
-                        let mut daemon_cmd = std::process::Command::new("git");
-                        daemon_cmd
-                            .arg("daemon")
-                            .arg("--base-path=.")
-                            .arg("--export-all")
-                            .arg("--enable=receive-pack")
-                            .arg("--reuseaddr");
+                        
+                        let check_addr = if listen_addr.is_empty() {
+                            "127.0.0.1:9418".to_string()
+                        } else {
+                            format!("{}:9418", listen_addr)
+                        };
+                        
+                        if std::net::TcpStream::connect(&check_addr).is_ok() {
+                            println!("\x1b[1;32m✓ Git Daemon is already running on {}, reusing it.\x1b[0m", check_addr);
+                        } else {
+                            let mut daemon_cmd = std::process::Command::new("git");
+                            daemon_cmd
+                                .arg("daemon")
+                                .arg("--base-path=.")
+                                .arg("--export-all")
+                                .arg("--enable=receive-pack")
+                                .arg("--reuseaddr");
 
-                        if !listen_addr.is_empty() {
-                            daemon_cmd.arg(format!("--listen={}", listen_addr));
-                        }
-
-                        daemon_cmd.stdout(std::process::Stdio::piped())
-                                  .stderr(std::process::Stdio::piped());
-
-                        match daemon_cmd.current_dir(target_dir).spawn() {
-                            Ok(mut child) => {
-                                std::thread::sleep(std::time::Duration::from_millis(500));
-                                if let Ok(Some(status)) = child.try_wait() {
-                                    if !status.success() {
-                                        use std::io::Read;
-                                        let mut err_str = String::new();
-                                        if let Some(mut stderr) = child.stderr.take() {
-                                            let _ = stderr.read_to_string(&mut err_str);
-                                        }
-                                        println!("\x1b[1;31mERROR: Git Daemon failed to start (exit code {}):\n{}\x1b[0m", status, err_str.trim());
-                                        std::process::exit(1);
-                                    }
-                                }
-                                println!(
-                                    "\x1b[1;32m✓ Git Daemon spawned with PID: {}\x1b[0m",
-                                    child.id()
-                                );
+                            if !listen_addr.is_empty() {
+                                daemon_cmd.arg(format!("--listen={}", listen_addr));
                             }
-                            Err(e) => {
-                                println!("\x1b[1;31mERROR: Failed to spawn git daemon: {}\x1b[0m", e);
-                                std::process::exit(1);
+
+                            daemon_cmd.stdout(std::process::Stdio::piped())
+                                      .stderr(std::process::Stdio::piped());
+
+                            match daemon_cmd.current_dir(target_dir).spawn() {
+                                Ok(mut child) => {
+                                    std::thread::sleep(std::time::Duration::from_millis(500));
+                                    if let Ok(Some(status)) = child.try_wait() {
+                                        if !status.success() {
+                                            use std::io::Read;
+                                            let mut err_str = String::new();
+                                            if let Some(mut stderr) = child.stderr.take() {
+                                                let _ = stderr.read_to_string(&mut err_str);
+                                            }
+                                            println!("\x1b[1;31mERROR: Git Daemon failed to start (exit code {}):\n{}\x1b[0m", status, err_str.trim());
+                                            std::process::exit(1);
+                                        }
+                                    }
+                                    println!(
+                                        "\x1b[1;32m✓ Git Daemon spawned with PID: {}\x1b[0m",
+                                        child.id()
+                                    );
+                                }
+                                Err(e) => {
+                                    println!("\x1b[1;31mERROR: Failed to spawn git daemon: {}\x1b[0m", e);
+                                    std::process::exit(1);
+                                }
                             }
                         }
                     }
@@ -248,7 +259,16 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                             .arg(format!("--path={}", path));
 
                         if !kubeconfig.is_empty() {
-                            flux_cmd.arg(format!("--kubeconfig={}", kubeconfig));
+                            let expanded_kubeconfig = if kubeconfig.starts_with("~/") {
+                                if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
+                                    home.join(&kubeconfig[2..]).to_string_lossy().to_string()
+                                } else {
+                                    kubeconfig.to_string()
+                                }
+                            } else {
+                                kubeconfig.to_string()
+                            };
+                            flux_cmd.arg(format!("--kubeconfig={}", expanded_kubeconfig));
                         }
 
                         let flux_output = flux_cmd.output();
