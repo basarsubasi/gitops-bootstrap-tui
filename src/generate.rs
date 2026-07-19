@@ -74,6 +74,67 @@ pub fn finalize_generation(
         root_kustomization_resources.push(format!("- {}", rel_path_str));
     }
 
+    // Extract unique namespaces and strip local namespace.yaml from target bases
+    let mut unique_namespaces = std::collections::HashSet::new();
+    for rel_path_str in checked_paths {
+        let base_comp_dir = target_bases.join(rel_path_str);
+        
+        // Read helm-release.yaml to extract namespace
+        let hr_path = base_comp_dir.join("helm-release.yaml");
+        if hr_path.exists() {
+            if let Ok(content) = fs::read_to_string(&hr_path) {
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("namespace:") {
+                        let ns = trimmed.strip_prefix("namespace:").unwrap().trim();
+                        // Remove surrounding quotes if any
+                        let ns = ns.trim_matches(|c| c == '"' || c == '\'');
+                        if ns != "flux-system" && ns != "default" {
+                            unique_namespaces.insert(ns.to_string());
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Remove namespace.yaml from base's kustomization.yaml to prevent ID collisions
+        let kust_path = base_comp_dir.join("kustomization.yaml");
+        if kust_path.exists() {
+            if let Ok(content) = fs::read_to_string(&kust_path) {
+                let new_content: Vec<&str> = content.lines()
+                    .filter(|l| !l.contains("- namespace.yaml"))
+                    .collect();
+                let _ = fs::write(&kust_path, new_content.join("\n") + "\n");
+            }
+        }
+    }
+
+    // Generate cluster-level namespaces explicitly
+    if !unique_namespaces.is_empty() {
+        let ns_cluster_dir = target_cluster.join("namespaces");
+        fs::create_dir_all(&ns_cluster_dir)?;
+        
+        let mut ns_resources = Vec::new();
+        let mut sorted_ns: Vec<_> = unique_namespaces.into_iter().collect();
+        sorted_ns.sort();
+        
+        for ns in &sorted_ns {
+            let ns_file = format!("{}.yaml", ns);
+            let ns_path = ns_cluster_dir.join(&ns_file);
+            fs::write(ns_path, format!("apiVersion: v1\nkind: Namespace\nmetadata:\n  name: {}\n", ns))?;
+            ns_resources.push(format!("  - {}", ns_file));
+        }
+        
+        fs::write(
+            ns_cluster_dir.join("kustomization.yaml"),
+            format!("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n{}\n", ns_resources.join("\n"))
+        )?;
+        
+        // Insert namespaces at the top of root resources
+        root_kustomization_resources.insert(0, "- namespaces".to_string());
+    }
+
     // 3. Generate repositories layer explicitly
     let repo_cluster_dir = target_cluster.join("repositories");
     fs::create_dir_all(&repo_cluster_dir)?;
