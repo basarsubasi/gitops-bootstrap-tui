@@ -1,3 +1,4 @@
+use serde::Deserialize;
 use serde_yaml::Value;
 use std::fs;
 use std::path::Path;
@@ -26,21 +27,30 @@ pub fn fetch_helm_values(component_dir: &Path, root_path: &Path) -> Result<Strin
         .and_then(|n| n.as_str())
         .ok_or("Could not find sourceRef.name in helm-release.yaml")?;
 
-    let repo_path = root_path.join("repositories").join(format!("{}.yaml", repo_name));
+    let repo_path = root_path.join("repositories").join("helm-repositories.yaml");
     
     if !repo_path.exists() {
         return Err(format!("Missing repository file: {}", repo_path.display()));
     }
 
     let repo_content = fs::read_to_string(&repo_path).map_err(|e| e.to_string())?;
-    let repo_yaml: Value = serde_yaml::from_str(&repo_content)
-        .map_err(|e| format!("Failed to parse {}.yaml: {}", repo_name, e))?;
+    
+    // Parse multiple YAML documents
+    let mut url = None;
+    for doc in serde_yaml::Deserializer::from_str(&repo_content) {
+        if let Ok(value) = Value::deserialize(doc) {
+            if let Some(metadata) = value.get("metadata") {
+                if let Some(name) = metadata.get("name").and_then(|n| n.as_str()) {
+                    if name == repo_name {
+                        url = value.get("spec").and_then(|s| s.get("url")).and_then(|u| u.as_str()).map(|s| s.to_string());
+                        break;
+                    }
+                }
+            }
+        }
+    }
 
-    let url = repo_yaml
-        .get("spec")
-        .and_then(|s| s.get("url"))
-        .and_then(|u| u.as_str())
-        .ok_or(format!("Could not find spec.url in {}.yaml", repo_name))?;
+    let url = url.ok_or(format!("Could not find repository '{}' in helm-repositories.yaml", repo_name))?;
 
     let chart_name = chart_spec
         .get("chart")
