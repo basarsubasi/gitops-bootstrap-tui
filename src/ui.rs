@@ -268,7 +268,7 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
 
                                 let mut router_cmd = std::process::Command::new("git-http-router");
                                 router_cmd.arg("--port").arg(http_port);
-                                router_cmd.arg("--root").arg(&expanded_path);
+                                router_cmd.arg("--root").arg(&expanded_gitops_path);
                                 if !http_username.is_empty() {
                                     router_cmd.arg("--username").arg(http_username);
                                 }
