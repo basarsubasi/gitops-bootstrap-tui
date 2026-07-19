@@ -15,10 +15,9 @@ You can also use your own templates, by creating a similar structure in a direct
 - **Component Explorer**: A navigable tree view to explore, enable, and disable Helm releases and GitOps components before generation.
 - **Value Customization**: You can customize the default helm chart values before generating the templates.
 - **Post-Generation Actions**:
-  - Automatically initialize a local Git repository and commit the bootstrapped structure.
-  - Spawn a local `git daemon` to serve your repository securely.
-  - Option to spawn a native asynchronous HTTP Server via `git-http-router` to seamlessly serve local repositories over HTTP instead of `git://`. [https://github.com/basarsubasi/git-http-router](https://github.com/basarsubasi/git-http-router)
-  - Bootstrap Flux CD directly to your Kubernetes cluster seamlessly from the UI.
+  - Automatically initialize a local Git repository, pull existing commits natively (ignoring conflicts), and commit the bootstrapped structure.
+  - Seamlessly push generated manifests to any standard remote Git provider (GitHub, GitLab, Gitea, Bitbucket) using SSH keys or HTTP tokens.
+  - Bootstrap Flux CD directly to your Kubernetes cluster from the UI securely using `flux bootstrap git` for provider-agnostic compatibility.
 - **Persistent Configuration**: User configurations and inputs are saved automatically to `~/.config/gitops-bootstrap-tui/config.json` and restored on the next run.
 
 ## Prerequisites
@@ -26,8 +25,8 @@ You can also use your own templates, by creating a similar structure in a direct
 - `git` CLI installed and available in `$PATH`
 - `flux` CLI installed and available in `$PATH`
 - `kubectl` CLI installed and available in `$PATH`
-- (Optional) `git-http-router` installed and available in `$PATH` for the native HTTP server option.
-- A valid Kubernetes cluster (e.g., Kind, Minikube, K3s) and `kubeconfig` for Flux bootstrap
+- An external Git repository (e.g., GitHub, GitLab, Gitea) configured and reachable.
+- A valid Kubernetes cluster (e.g., Kind, Minikube, K3s) and `kubeconfig` for Flux bootstrap.
 
 ## Installation
 
@@ -45,11 +44,30 @@ You can run the binary directly from the `target/release` directory or install i
 cargo install --path .
 ```
 
-## Usage
+## Prior Setup & Configuration
 
-Start the TUI by running:
+Before running the TUI, you must prepare your environment so that Git and Flux can securely communicate with your remote Git provider (GitLab, GitHub, etc.):
 
+**1. Generate an SSH Key (If you don't have one)**
 ```bash
-gitops-bootstrap-tui
+ssh-keygen -t ed25519 -C "your_email@example.com"
+```
+*(Save it to the default location `~/.ssh/id_ed25519` without a passphrase for automated Flux access).*
+
+**2. Add the Public Key to your Git Provider**
+Copy the contents of your public key (`cat ~/.ssh/id_ed25519.pub`) and add it to your GitLab/GitHub account as a new SSH key. This gives you push access.
+
+**3. Create an Empty Repository**
+Go to your Git provider's web interface and create a new, blank repository (e.g., `cicd/flux/testing-tool`). Do not initialize it with a README.
+
+**4. Test Your SSH Connection**
+Ensure your machine can authenticate without interactive prompts:
+```bash
+# For GitLab
+ssh -T git@gitlab.com
+# For GitHub
+ssh -T git@github.com
 ```
 
+**5. Prepare Your Kubernetes Cluster**
+Ensure you have an active Kubernetes context (`kubectl config current-context`) pointing to the cluster where you want to bootstrap Flux.
