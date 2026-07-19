@@ -877,7 +877,7 @@ pub fn start_execution_thread(app: &mut App) {
                             .arg("--rebase")
                             .arg("--allow-unrelated-histories")
                             .arg("-X")
-                            .arg("theirs")
+                            .arg("ours")
                             .current_dir(target_dir);
 
                         if let Some(ref ssh_cmd) = ssh_env {
