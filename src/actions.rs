@@ -83,13 +83,21 @@ impl ModalState {
 
     pub fn new_http(config: &crate::config::AppConfig) -> Self {
         let http_port = config.git_http_server_port.to_string();
+        let username = config.git_http_server_username.clone();
+        let password = config.git_http_server_password.clone();
 
         let inputs = vec![
             Input::default()
                 .with_value(http_port.clone())
                 .with_cursor(http_port.chars().count()),
+            Input::default()
+                .with_value(username.clone())
+                .with_cursor(username.chars().count()),
+            Input::default()
+                .with_value(password.clone())
+                .with_cursor(password.chars().count()),
         ];
-        let labels = vec!["HTTP Server Port"];
+        let labels = vec!["HTTP Server Port", "HTTP Username", "HTTP Password"];
         Self {
             inputs,
             labels,

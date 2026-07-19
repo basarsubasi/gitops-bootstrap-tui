@@ -132,7 +132,6 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                             .and_then(|m| m.inputs.first())
                             .map(|m| m.value())
                             .unwrap_or("8080");
-
                         let init_output = std::process::Command::new("git")
                             .arg("init")
                             .arg(format!("--initial-branch={}", initial_branch))
@@ -254,9 +253,28 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                             if std::net::TcpStream::connect(&check_addr).is_ok() {
                                 println!("\x1b[1;32m✓ Git HTTP Server is already running on {}, reusing it.\x1b[0m", check_addr);
                             } else {
+                                let http_username = actions
+                                    .http_modal
+                                    .as_ref()
+                                    .and_then(|m| m.inputs.get(1))
+                                    .map(|m| m.value())
+                                    .unwrap_or("git");
+                                let http_password = actions
+                                    .http_modal
+                                    .as_ref()
+                                    .and_then(|m| m.inputs.get(2))
+                                    .map(|m| m.value())
+                                    .unwrap_or("password");
+
                                 let mut router_cmd = std::process::Command::new("git-http-router");
                                 router_cmd.arg("--port").arg(http_port);
                                 router_cmd.arg("--root").arg(".");
+                                if !http_username.is_empty() {
+                                    router_cmd.arg("--username").arg(http_username);
+                                }
+                                if !http_password.is_empty() {
+                                    router_cmd.arg("--password").arg(http_password);
+                                }
 
                                 router_cmd.stdout(std::process::Stdio::piped())
                                           .stderr(std::process::Stdio::piped());
@@ -297,6 +315,19 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                         let path = modal.inputs[2].value();
                         let kubeconfig = modal.inputs[3].value();
                         let ssh_key = modal.inputs[4].value();
+
+                        let http_username = actions
+                            .http_modal
+                            .as_ref()
+                            .and_then(|m| m.inputs.get(1))
+                            .map(|m| m.value())
+                            .unwrap_or("git");
+                        let http_password = actions
+                            .http_modal
+                            .as_ref()
+                            .and_then(|m| m.inputs.get(2))
+                            .map(|m| m.value())
+                            .unwrap_or("password");
 
                         let kubeconfig_arg = if !kubeconfig.is_empty() {
                             let expanded_kubeconfig = if let Some(stripped) = kubeconfig.strip_prefix("~/") {
@@ -439,6 +470,10 @@ spec:
 
                             if git_url.starts_with("http://") {
                                 flux_cmd.arg("--allow-insecure-http=true");
+                                if actions.git_http_server && !http_username.is_empty() && !http_password.is_empty() {
+                                    flux_cmd.arg(format!("--username={}", http_username));
+                                    flux_cmd.arg(format!("--password={}", http_password));
+                                }
                             }
 
                             if let Some(ref arg) = kubeconfig_arg {
@@ -759,10 +794,13 @@ where
                                             modal.inputs[0].value().to_string();
                                         app.config.git_branch = modal.inputs[1].value().to_string();
                                     }
-                                    if let Some(modal) = &owned_actions.http_modal
-                                        && let Ok(port) = modal.inputs[0].value().parse::<u16>() {
+                                    if let Some(modal) = &owned_actions.http_modal {
+                                        if let Ok(port) = modal.inputs[0].value().parse::<u16>() {
                                             app.config.git_http_server_port = port;
                                         }
+                                        app.config.git_http_server_username = modal.inputs[1].value().to_string();
+                                        app.config.git_http_server_password = modal.inputs[2].value().to_string();
+                                    }
                                     let _ = app.config.save();
                                 }
 
