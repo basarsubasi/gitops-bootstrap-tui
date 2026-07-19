@@ -150,6 +150,20 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                             _ => {}
                         }
 
+                        let config_output = std::process::Command::new("git")
+                            .arg("config")
+                            .arg("receive.denyCurrentBranch")
+                            .arg("updateInstead")
+                            .current_dir(target_dir)
+                            .output();
+                        match config_output {
+                            Ok(out) if !out.status.success() => {
+                                let stderr = String::from_utf8_lossy(&out.stderr);
+                                println!("\x1b[1;33mWARNING: Failed to set git config receive.denyCurrentBranch:\n{}\x1b[0m", stderr.trim());
+                            }
+                            _ => {}
+                        }
+
                         let add_output = std::process::Command::new("git")
                             .arg("add")
                             .arg(".")
@@ -249,10 +263,16 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                         if actions.git_http_server {
                             println!("\x1b[1;36m[2.5/3] Spawning Git HTTP Server (git-http-router)...\x1b[0m");
                             
+                            // Kill any existing git-http-router to prevent zombie processes serving old paths
+                            let _ = std::process::Command::new("killall")
+                                .arg("git-http-router")
+                                .output();
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                            
                             let check_addr = format!("127.0.0.1:{}", http_port);
                             if std::net::TcpStream::connect(&check_addr).is_ok() {
-                                println!("\x1b[1;32m✓ Git HTTP Server is already running on {}, reusing it.\x1b[0m", check_addr);
-                            } else {
+                                println!("\x1b[1;33mWARNING: Port {} is still in use by another program. Flux may fail to reach the router.\x1b[0m", http_port);
+                            }
                                 let http_username = actions
                                     .http_modal
                                     .as_ref()
@@ -302,7 +322,6 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                                         std::process::exit(1);
                                     }
                                 }
-                            }
                         }
                     }
 
