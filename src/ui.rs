@@ -250,15 +250,7 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                         let path = modal.inputs[2].value();
                         let kubeconfig = modal.inputs[3].value();
 
-                        let mut flux_cmd = std::process::Command::new("flux");
-                        flux_cmd
-                            .arg("bootstrap")
-                            .arg("git")
-                            .arg(format!("--url={}", git_url))
-                            .arg(format!("--branch={}", branch))
-                            .arg(format!("--path={}", path));
-
-                        if !kubeconfig.is_empty() {
+                        let kubeconfig_arg = if !kubeconfig.is_empty() {
                             let expanded_kubeconfig = if kubeconfig.starts_with("~/") {
                                 if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
                                     home.join(&kubeconfig[2..]).to_string_lossy().to_string()
@@ -268,23 +260,71 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                             } else {
                                 kubeconfig.to_string()
                             };
-                            flux_cmd.arg(format!("--kubeconfig={}", expanded_kubeconfig));
-                        }
+                            Some(format!("--kubeconfig={}", expanded_kubeconfig))
+                        } else {
+                            None
+                        };
 
-                        let flux_output = flux_cmd.output();
-                        match flux_output {
-                            Ok(output) => {
-                                if !output.status.success() {
-                                    let stderr = String::from_utf8_lossy(&output.stderr);
-                                    println!("\x1b[1;31mERROR: Flux bootstrap failed (exit code {}):\n{}\x1b[0m", output.status, stderr.trim());
+                        let run_flux_cmd = |mut cmd: std::process::Command, name: &str| {
+                            match cmd.output() {
+                                Ok(output) => {
+                                    if !output.status.success() {
+                                        let stderr = String::from_utf8_lossy(&output.stderr);
+                                        println!("\x1b[1;31mERROR: {} failed (exit code {}):\n{}\x1b[0m", name, output.status, stderr.trim());
+                                        std::process::exit(1);
+                                    }
+                                }
+                                Err(e) => {
+                                    println!("\x1b[1;31mERROR: Failed to execute {}: {}\x1b[0m", name, e);
                                     std::process::exit(1);
                                 }
-                                println!("\x1b[1;32m✓ Flux bootstrap completed successfully\x1b[0m");
                             }
-                            Err(e) => {
-                                println!("\x1b[1;31mERROR: Failed to execute flux CLI: {}\x1b[0m", e);
-                                std::process::exit(1);
+                        };
+
+                        if git_url.starts_with("git://") {
+                            println!("\x1b[1;33mℹ Using unauthenticated Flux setup for git:// protocol...\x1b[0m");
+                            
+                            println!("\x1b[1;36m  -> Running flux install...\x1b[0m");
+                            let mut install_cmd = std::process::Command::new("flux");
+                            install_cmd.arg("install");
+                            if let Some(ref arg) = kubeconfig_arg { install_cmd.arg(arg); }
+                            run_flux_cmd(install_cmd, "flux install");
+
+                            println!("\x1b[1;36m  -> Creating GitRepository source...\x1b[0m");
+                            let mut source_cmd = std::process::Command::new("flux");
+                            source_cmd.args(["create", "source", "git", "flux-system"])
+                                .arg(format!("--url={}", git_url))
+                                .arg(format!("--branch={}", branch))
+                                .arg("--interval=1m");
+                            if let Some(ref arg) = kubeconfig_arg { source_cmd.arg(arg); }
+                            run_flux_cmd(source_cmd, "flux create source");
+
+                            println!("\x1b[1;36m  -> Creating Kustomization...\x1b[0m");
+                            let mut kustomize_cmd = std::process::Command::new("flux");
+                            kustomize_cmd.args(["create", "kustomization", "flux-system"])
+                                .arg("--source=GitRepository/flux-system")
+                                .arg(format!("--path={}", path))
+                                .arg("--prune=true")
+                                .arg("--interval=1m");
+                            if let Some(ref arg) = kubeconfig_arg { kustomize_cmd.arg(arg); }
+                            run_flux_cmd(kustomize_cmd, "flux create kustomization");
+
+                            println!("\x1b[1;32m✓ Flux unauthenticated bootstrap completed successfully\x1b[0m");
+                        } else {
+                            let mut flux_cmd = std::process::Command::new("flux");
+                            flux_cmd
+                                .arg("bootstrap")
+                                .arg("git")
+                                .arg(format!("--url={}", git_url))
+                                .arg(format!("--branch={}", branch))
+                                .arg(format!("--path={}", path));
+
+                            if let Some(ref arg) = kubeconfig_arg {
+                                flux_cmd.arg(arg);
                             }
+
+                            run_flux_cmd(flux_cmd, "flux bootstrap");
+                            println!("\x1b[1;32m✓ Flux bootstrap completed successfully\x1b[0m");
                         }
                     }
                 }
