@@ -1,5 +1,8 @@
 # GitOps Bootstrap TUI
 
+> [!CAUTION]
+> **THIS PROJECT IS MEANT TO BE USED ON EPHEMERAL CLUSTERS FOR EXPERIMENTATION. DO NOT USE IN PRODUCTION.**
+
 An interactive Terminal User Interface (TUI) tool written in Rust to seamlessly bootstrap and manage local GitOps repositories and Flux CD deployments, optimal for ephemeral k8s clusters and stack experimentation.
 
 
