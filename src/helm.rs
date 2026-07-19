@@ -42,6 +42,11 @@ pub fn fetch_helm_values(component_dir: &Path, root_path: &Path) -> Result<Strin
         .and_then(|u| u.as_str())
         .ok_or(format!("Could not find spec.url in {}.yaml", repo_name))?;
 
+    let chart_name = chart_spec
+        .get("chart")
+        .and_then(|c| c.as_str())
+        .ok_or("Could not find chart name")?;
+
     let mut cmd = Command::new("helm");
     cmd.arg("show")
         .arg("values")
