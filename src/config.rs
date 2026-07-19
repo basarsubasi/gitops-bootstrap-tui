@@ -27,6 +27,8 @@ pub struct AppConfig {
     pub flux_git_branch: String,
     #[serde(default)]
     pub flux_kubeconfig: String,
+    #[serde(default)]
+    pub flux_ssh_key_path: String,
 }
 
 impl Default for AppConfig {
@@ -43,6 +45,7 @@ impl Default for AppConfig {
             flux_git_url: "git://127.0.0.1/".to_string(),
             flux_git_branch: "main".to_string(),
             flux_kubeconfig: "~/.kube/config".to_string(),
+            flux_ssh_key_path: "".to_string(),
         }
     }
 }

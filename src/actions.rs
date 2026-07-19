@@ -31,6 +31,7 @@ impl ModalState {
         let git_branch = config.flux_git_branch.clone();
         let cluster_path = format!("./{}", config.new_cluster_name);
         let kubeconfig = config.flux_kubeconfig.clone();
+        let ssh_key = config.flux_ssh_key_path.clone();
 
         let inputs = vec![
             Input::default()
@@ -45,8 +46,11 @@ impl ModalState {
             Input::default()
                 .with_value(kubeconfig.clone())
                 .with_cursor(kubeconfig.chars().count()),
+            Input::default()
+                .with_value(ssh_key.clone())
+                .with_cursor(ssh_key.chars().count()),
         ];
-        let labels = vec!["Git URL", "Git Branch", "Git Path", "Kubeconfig Path"];
+        let labels = vec!["Git URL", "Git Branch", "Git Path", "Kubeconfig Path", "Git SSH Key Path (Optional)"];
         Self {
             inputs,
             labels,

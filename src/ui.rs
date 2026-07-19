@@ -217,8 +217,8 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                             match daemon_cmd.current_dir(target_dir).spawn() {
                                 Ok(mut child) => {
                                     std::thread::sleep(std::time::Duration::from_millis(500));
-                                    if let Ok(Some(status)) = child.try_wait() {
-                                        if !status.success() {
+                                    if let Ok(Some(status)) = child.try_wait()
+                                        && !status.success() {
                                             use std::io::Read;
                                             let mut err_str = String::new();
                                             if let Some(mut stderr) = child.stderr.take() {
@@ -227,7 +227,6 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                                             println!("\x1b[1;31mERROR: Git Daemon failed to start (exit code {}):\n{}\x1b[0m", status, err_str.trim());
                                             std::process::exit(1);
                                         }
-                                    }
                                     println!(
                                         "\x1b[1;32m✓ Git Daemon spawned with PID: {}\x1b[0m",
                                         child.id()
@@ -249,11 +248,12 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                         let branch = modal.inputs[1].value();
                         let path = modal.inputs[2].value();
                         let kubeconfig = modal.inputs[3].value();
+                        let ssh_key = modal.inputs[4].value();
 
                         let kubeconfig_arg = if !kubeconfig.is_empty() {
-                            let expanded_kubeconfig = if kubeconfig.starts_with("~/") {
+                            let expanded_kubeconfig = if let Some(stripped) = kubeconfig.strip_prefix("~/") {
                                 if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
-                                    home.join(&kubeconfig[2..]).to_string_lossy().to_string()
+                                    home.join(stripped).to_string_lossy().to_string()
                                 } else {
                                     kubeconfig.to_string()
                                 }
@@ -261,6 +261,21 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                                 kubeconfig.to_string()
                             };
                             Some(format!("--kubeconfig={}", expanded_kubeconfig))
+                        } else {
+                            None
+                        };
+
+                        let ssh_key_arg = if !ssh_key.is_empty() {
+                            let expanded_ssh_key = if let Some(stripped) = ssh_key.strip_prefix("~/") {
+                                if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
+                                    home.join(stripped).to_string_lossy().to_string()
+                                } else {
+                                    ssh_key.to_string()
+                                }
+                            } else {
+                                ssh_key.to_string()
+                            };
+                            Some(format!("--private-key-file={}", expanded_ssh_key))
                         } else {
                             None
                         };
@@ -320,6 +335,9 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                                 .arg(format!("--path={}", path));
 
                             if let Some(ref arg) = kubeconfig_arg {
+                                flux_cmd.arg(arg);
+                            }
+                            if let Some(ref arg) = ssh_key_arg {
                                 flux_cmd.arg(arg);
                             }
 
