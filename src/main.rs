@@ -10,6 +10,7 @@ mod home;
 mod summary;
 mod ui;
 mod wizard;
+mod executing;
 
 fn check_cli_deps() -> Result<(), String> {
     if Command::new("git").arg("--version").output().is_err() {

@@ -49,7 +49,7 @@ impl ModalState {
                 .with_value(ssh_key.clone())
                 .with_cursor(ssh_key.chars().count()),
         ];
-        let labels = vec!["Git URL", "Git Branch", "Git Path", "Kubeconfig Path", "Git SSH Key Path (Optional)"];
+        let labels = vec!["Git URL", "Git Branch", "Git Path", "Kubeconfig Path", "Git SSH Key Path"];
         Self {
             inputs,
             labels,

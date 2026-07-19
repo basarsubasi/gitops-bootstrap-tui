@@ -24,6 +24,7 @@ pub enum View {
     Explorer(ExplorerState),
     Actions(crate::actions::ActionsState),
     Summary(crate::summary::SummaryState),
+    Executing(crate::executing::ExecutingState),
 }
 
 pub struct App {
@@ -36,7 +37,6 @@ pub struct App {
     )>,
     pub pending_actions: Option<crate::actions::ActionsState>,
     pub saved_explorer_state: Option<ExplorerState>,
-    pub execute_generation: bool,
 }
 
 impl App {
@@ -48,7 +48,6 @@ impl App {
             pending_generation: None,
             pending_actions: None,
             saved_explorer_state: None,
-            execute_generation: false,
         }
     }
 }
@@ -78,387 +77,6 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
     )?;
     terminal.show_cursor()?;
 
-    if app.execute_generation
-        && let Some((checked_paths, customized_paths)) = app.pending_generation
-    {
-        println!("\x1b[1;36m[1/3] Generating Output GitOps Directory...\x1b[0m");
-        if let Ok(git_mgr) = crate::git::GitManager::new(&app.config.template_repo_url) {
-            let expanded_gitops_path = if app.config.gitops_dir_path.starts_with("~/") {
-                if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf())
-                {
-                    home.join(&app.config.gitops_dir_path[2..])
-                        .to_string_lossy()
-                        .to_string()
-                } else {
-                    app.config.gitops_dir_path.clone()
-                }
-            } else {
-                app.config.gitops_dir_path.clone()
-            };
-
-            if let Err(e) = crate::generate::finalize_generation(
-                &git_mgr.repo_dir,
-                &expanded_gitops_path,
-                &app.config.base_dir_path,
-                &app.config.new_cluster_name,
-                &checked_paths,
-                &customized_paths,
-            ) {
-                println!("\x1b[1;31mError generating: {:?}\x1b[0m", e);
-            } else {
-                println!(
-                    "\x1b[1;32m✓ Successfully generated GitOps directory at {}\x1b[0m",
-                    expanded_gitops_path
-                );
-                if let Some(actions) = app.pending_actions {
-                    if actions.init_git {
-                        println!("\x1b[1;36m[2/3] Initializing Git Repository & Pushing to Remote...\x1b[0m");
-                        let target_dir = std::path::Path::new(&expanded_gitops_path);
-
-                        let git_url = actions
-                            .flux_modal
-                            .as_ref()
-                            .map(|m| m.inputs[0].value())
-                            .unwrap_or("git@github.com:my-org/my-gitops-repo.git");
-                        let initial_branch = actions
-                            .flux_modal
-                            .as_ref()
-                            .map(|m| m.inputs[1].value())
-                            .unwrap_or("main");
-                        let ssh_key = actions
-                            .flux_modal
-                            .as_ref()
-                            .map(|m| m.inputs[4].value())
-                            .unwrap_or("");
-
-                        if ssh_key.is_empty() {
-                            println!("\x1b[1;31mERROR: Git SSH Key Path is required for pushing to remote and bootstrapping.\x1b[0m");
-                            std::process::exit(1);
-                        }
-
-                        let init_output = std::process::Command::new("git")
-                            .arg("init")
-                            .arg(format!("--initial-branch={}", initial_branch))
-                            .current_dir(target_dir)
-                            .output();
-                        match init_output {
-                            Ok(out) if !out.status.success() => {
-                                let stderr = String::from_utf8_lossy(&out.stderr);
-                                println!("\x1b[1;31mERROR: Failed to initialize git repository:\n{}\x1b[0m", stderr.trim());
-                                std::process::exit(1);
-                            }
-                            Err(e) => {
-                                println!("\x1b[1;31mERROR: Failed to execute git init: {}\x1b[0m", e);
-                                std::process::exit(1);
-                            }
-                            _ => {}
-                        }
-
-                        let add_output = std::process::Command::new("git")
-                            .arg("add")
-                            .arg(".")
-                            .current_dir(target_dir)
-                            .output();
-                        match add_output {
-                            Ok(out) if !out.status.success() => {
-                                let stderr = String::from_utf8_lossy(&out.stderr);
-                                println!("\x1b[1;31mERROR: Failed to add files to git repository:\n{}\x1b[0m", stderr.trim());
-                                std::process::exit(1);
-                            }
-                            Err(e) => {
-                                println!("\x1b[1;31mERROR: Failed to execute git add: {}\x1b[0m", e);
-                                std::process::exit(1);
-                            }
-                            _ => {}
-                        }
-
-                        let commit_output = std::process::Command::new("git")
-                            .arg("commit")
-                            .arg("-m")
-                            .arg("Initial GitOps Commit")
-                            .current_dir(target_dir)
-                            .output();
-                        match commit_output {
-                            Ok(out) if !out.status.success() => {
-                                let stderr = String::from_utf8_lossy(&out.stderr);
-                                let stdout = String::from_utf8_lossy(&out.stdout);
-                                if stdout.contains("nothing to commit") || stderr.contains("nothing to commit") {
-                                    println!("\x1b[1;33mℹ Nothing to commit (working tree clean).\x1b[0m");
-                                } else {
-                                    println!("\x1b[1;31mERROR: Failed to commit to git repository:\n{}\x1b[0m", stderr.trim());
-                                    std::process::exit(1);
-                                }
-                            }
-                            Err(e) => {
-                                println!("\x1b[1;31mERROR: Failed to execute git commit: {}\x1b[0m", e);
-                                std::process::exit(1);
-                            }
-                            _ => {}
-                        }
-
-                        let remote_add_output = std::process::Command::new("git")
-                            .arg("remote")
-                            .arg("add")
-                            .arg("origin")
-                            .arg(git_url)
-                            .current_dir(target_dir)
-                            .output();
-                        match remote_add_output {
-                            Ok(out) if !out.status.success() => {
-                                let stderr = String::from_utf8_lossy(&out.stderr);
-                                if stderr.contains("already exists") {
-                                    println!("\x1b[1;33mℹ Remote origin already exists, skipping addition.\x1b[0m");
-                                } else {
-                                    println!("\x1b[1;31mERROR: Failed to add remote to git repository:\n{}\x1b[0m", stderr.trim());
-                                    std::process::exit(1);
-                                }
-                            }
-                            Err(e) => {
-                                println!("\x1b[1;31mERROR: Failed to execute git remote add: {}\x1b[0m", e);
-                                std::process::exit(1);
-                            }
-                            _ => {}
-                        }
-
-                        let ssh_env = if !ssh_key.is_empty() {
-                            let expanded_ssh_key = if let Some(stripped) = ssh_key.strip_prefix("~/") {
-                                if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
-                                    home.join(stripped).to_string_lossy().to_string()
-                                } else {
-                                    ssh_key.to_string()
-                                }
-                            } else {
-                                ssh_key.to_string()
-                            };
-                            Some(format!("ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new", expanded_ssh_key))
-                        } else {
-                            None
-                        };
-
-                        // Attempt to pull and rebase before pushing to handle existing repos seamlessly
-                        let mut pull_cmd = std::process::Command::new("git");
-                        pull_cmd
-                            .arg("pull")
-                            .arg("origin")
-                            .arg(initial_branch)
-                            .arg("--rebase")
-                            .arg("--allow-unrelated-histories")
-                            .current_dir(target_dir);
-
-                        if let Some(ref ssh_cmd) = ssh_env {
-                            pull_cmd.env("GIT_SSH_COMMAND", ssh_cmd);
-                        }
-
-                        // We ignore the result of pull, as it will fail on entirely empty repositories, which is perfectly fine.
-                        let _ = pull_cmd.output();
-
-                        let mut push_cmd = std::process::Command::new("git");
-                        push_cmd.arg("push").arg("-u").arg("origin").arg(initial_branch).current_dir(target_dir);
-
-                        if let Some(ref ssh_cmd) = ssh_env {
-                            push_cmd.env("GIT_SSH_COMMAND", ssh_cmd);
-                        }
-
-                        match push_cmd.output() {
-                            Ok(out) if !out.status.success() => {
-                                let stderr = String::from_utf8_lossy(&out.stderr);
-                                println!("\x1b[1;31mERROR: Failed to push to remote repository:\n{}\x1b[0m", stderr.trim());
-                                std::process::exit(1);
-                            }
-                            Err(e) => {
-                                println!("\x1b[1;31mERROR: Failed to execute git push: {}\x1b[0m", e);
-                                std::process::exit(1);
-                            }
-                            _ => {}
-                        }
-
-                        println!(
-                            "\x1b[1;32m✓ Git initialized and pushed to remote branch '{}'\x1b[0m",
-                            initial_branch
-                        );
-                    }
-
-                    if actions.bootstrap_flux
-                        && let Some(modal) = actions.flux_modal
-                    {
-                        println!("\x1b[1;36m[3/3] Bootstrapping Flux...\x1b[0m");
-                        let git_url = modal.inputs[0].value();
-                        let branch = modal.inputs[1].value();
-                        let path = modal.inputs[2].value();
-                        let kubeconfig = modal.inputs[3].value();
-                        let ssh_key = modal.inputs[4].value();
-
-                        if ssh_key.is_empty() {
-                            println!("\x1b[1;31mERROR: Git SSH Key Path is required for bootstrapping.\x1b[0m");
-                            std::process::exit(1);
-                        }
-
-                        let kubeconfig_arg = if !kubeconfig.is_empty() {
-                            let expanded_kubeconfig = if let Some(stripped) = kubeconfig.strip_prefix("~/") {
-                                if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
-                                    home.join(stripped).to_string_lossy().to_string()
-                                } else {
-                                    kubeconfig.to_string()
-                                }
-                            } else {
-                                kubeconfig.to_string()
-                            };
-                            Some(format!("--kubeconfig={}", expanded_kubeconfig))
-                        } else {
-                            None
-                        };
-
-                        let ssh_key_arg = if !ssh_key.is_empty() {
-                            let expanded_ssh_key = if let Some(stripped) = ssh_key.strip_prefix("~/") {
-                                if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
-                                    home.join(stripped).to_string_lossy().to_string()
-                                } else {
-                                    ssh_key.to_string()
-                                }
-                            } else {
-                                ssh_key.to_string()
-                            };
-                            Some(format!("--private-key-file={}", expanded_ssh_key))
-                        } else {
-                            None
-                        };
-
-                        let run_flux_cmd = |mut cmd: std::process::Command, name: &str| {
-                            match cmd.status() {
-                                Ok(status) => {
-                                    if !status.success() {
-                                        println!("\x1b[1;31mERROR: {} failed (exit code {})\x1b[0m", name, status);
-                                        std::process::exit(1);
-                                    }
-                                }
-                                Err(e) => {
-                                    println!("\x1b[1;31mERROR: Failed to execute {}: {}\x1b[0m", name, e);
-                                    std::process::exit(1);
-                                }
-                            }
-                        };
-
-                        if git_url.starts_with("git://") {
-                            println!("\x1b[1;33mℹ Using unauthenticated Flux setup for git:// protocol...\x1b[0m");
-                            
-                            println!("\x1b[1;36m  -> Running flux install...\x1b[0m");
-                            let mut install_cmd = std::process::Command::new("flux");
-                            install_cmd.arg("install");
-                            if let Some(ref arg) = kubeconfig_arg { install_cmd.arg(arg); }
-                            run_flux_cmd(install_cmd, "flux install");
-
-                            println!("\x1b[1;36m  -> Applying GitRepository and Kustomization manifests...\x1b[0m");
-                            
-                            let combined_yaml = format!(r#"
-apiVersion: source.toolkit.fluxcd.io/v1
-kind: GitRepository
-metadata:
-  name: flux-system
-  namespace: flux-system
-spec:
-  interval: 1m0s
-  ref:
-    branch: {}
-  url: {}
----
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: flux-system
-  namespace: flux-system
-spec:
-  interval: 1m0s
-  path: {}
-  prune: true
-  sourceRef:
-    kind: GitRepository
-    name: flux-system
-"#, branch, git_url, path);
-
-                            let mut kubectl_cmd = std::process::Command::new("kubectl");
-                            kubectl_cmd.arg("apply").arg("-f").arg("-");
-                            
-                            if !kubeconfig.is_empty() {
-                                let expanded_kubeconfig = if let Some(stripped) = kubeconfig.strip_prefix("~/") {
-                                    if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
-                                        home.join(stripped).to_string_lossy().to_string()
-                                    } else {
-                                        kubeconfig.to_string()
-                                    }
-                                } else {
-                                    kubeconfig.to_string()
-                                };
-                                kubectl_cmd.arg(format!("--kubeconfig={}", expanded_kubeconfig));
-                            }
-
-                            use std::io::Write;
-                            kubectl_cmd.stdin(std::process::Stdio::piped())
-                                       .stdout(std::process::Stdio::piped())
-                                       .stderr(std::process::Stdio::piped());
-
-                            match kubectl_cmd.spawn() {
-                                Ok(mut child) => {
-                                    if let Some(mut stdin) = child.stdin.take() {
-                                        let _ = stdin.write_all(combined_yaml.as_bytes());
-                                    }
-                                    match child.wait_with_output() {
-                                        Ok(output) => {
-                                            if !output.status.success() {
-                                                let stderr = String::from_utf8_lossy(&output.stderr);
-                                                println!("\x1b[1;31mERROR: kubectl apply failed (exit code {}):\n{}\x1b[0m", output.status, stderr.trim());
-                                                std::process::exit(1);
-                                            }
-                                        }
-                                        Err(e) => {
-                                            println!("\x1b[1;31mERROR: Failed to wait on kubectl: {}\x1b[0m", e);
-                                            std::process::exit(1);
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    println!("\x1b[1;31mERROR: Failed to execute kubectl (is it installed?): {}\x1b[0m", e);
-                                    std::process::exit(1);
-                                }
-                            }
-
-                            println!("\x1b[1;32m✓ Flux unauthenticated bootstrap completed successfully\x1b[0m");
-                        } else {
-                            let mut flux_git_url = git_url.to_string();
-                            if flux_git_url.starts_with("git@") && !flux_git_url.starts_with("ssh://") {
-                                if let Some(colon_pos) = flux_git_url.find(':') {
-                                    flux_git_url.replace_range(colon_pos..colon_pos+1, "/");
-                                    flux_git_url.insert_str(0, "ssh://");
-                                }
-                            }
-
-                            let mut flux_cmd = std::process::Command::new("flux");
-                            flux_cmd
-                                .arg("bootstrap")
-                                .arg("git")
-                                .arg(format!("--url={}", flux_git_url))
-                                .arg(format!("--branch={}", branch))
-                                .arg(format!("--path={}", path));
-
-                            if git_url.starts_with("http://") || git_url.starts_with("https://") {
-                                flux_cmd.arg("--allow-insecure-http=true");
-                            }
-
-                            if let Some(ref arg) = kubeconfig_arg {
-                                flux_cmd.arg(arg);
-                            }
-                            if let Some(ref arg) = ssh_key_arg {
-                                flux_cmd.arg(arg);
-                            }
-
-                            run_flux_cmd(flux_cmd, "flux bootstrap");
-                            println!("\x1b[1;32m✓ Flux bootstrap completed successfully\x1b[0m");
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     if let Err(err) = res {
         println!("{:?}", err);
     }
@@ -483,6 +101,21 @@ where
                 }
 
                 match &mut app.view {
+                    View::Executing(exec) => {
+                        exec.poll_events();
+                        let triggered = exec.handle_event(&ev);
+                        if triggered {
+                            if exec.should_quit {
+                                app.should_quit = true;
+                            } else if exec.go_back {
+                                if let Some(actions) = app.pending_actions.take() {
+                                    app.view = View::Actions(actions);
+                                } else {
+                                    app.should_quit = true;
+                                }
+                            }
+                        }
+                    }
                     View::Home(home) => {
                         let triggered = home.handle_event(&ev);
                         if triggered && let Some(action) = home.action_trigger {
@@ -778,8 +411,7 @@ where
                         let triggered = summary.handle_event(&ev);
                         if triggered && let Some(trigger) = &summary.action_trigger {
                             if trigger == "Finish" {
-                                app.execute_generation = true; // ONLY set this if they actually finished!
-                                app.should_quit = true;
+                                crate::ui::start_execution_thread(app);
                             } else if trigger == "Previous"
                                 && let Some(saved_actions) = app.pending_actions.take()
                             {
@@ -802,33 +434,40 @@ pub fn ui(f: &mut Frame, app: &mut App) {
 
     let mut title_spans = vec![];
     
-    if matches!(app.view, View::Home(_)) {
-        title_spans.push(Span::styled(" HOME ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
-    } else {
-        title_spans.push(Span::raw(" "));
-        
-        let active = matches!(app.view, View::Wizard(_) | View::Loading);
-        title_spans.push(Span::styled("WIZARD", if active { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) }));
-        
-        title_spans.push(Span::styled(" > ", Style::default().fg(Color::DarkGray)));
-        
-        let active = matches!(app.view, View::Explorer(_));
-        title_spans.push(Span::styled("COMPONENTS", if active { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) }));
-        
-        title_spans.push(Span::styled(" > ", Style::default().fg(Color::DarkGray)));
-        
-        let active = matches!(app.view, View::Actions(_));
-        title_spans.push(Span::styled("ACTIONS", if active { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) }));
-        
-        title_spans.push(Span::styled(" > ", Style::default().fg(Color::DarkGray)));
-        
-        let active = matches!(app.view, View::Summary(_));
-        title_spans.push(Span::styled("SUMMARY", if active { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) }));
-        
-        title_spans.push(Span::raw(" "));
+    match &app.view {
+        View::Executing(_) => {
+            title_spans.push(Span::styled(" EXECUTING ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
+        }
+        View::Home(_) => {
+            title_spans.push(Span::styled(" HOME ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
+        }
+        _ => {
+            title_spans.push(Span::raw(" "));
+            
+            let active = matches!(app.view, View::Wizard(_) | View::Loading);
+            title_spans.push(Span::styled("WIZARD", if active { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) }));
+            
+            title_spans.push(Span::styled(" > ", Style::default().fg(Color::DarkGray)));
+            
+            let active = matches!(app.view, View::Explorer(_));
+            title_spans.push(Span::styled("COMPONENTS", if active { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) }));
+            
+            title_spans.push(Span::styled(" > ", Style::default().fg(Color::DarkGray)));
+            
+            let active = matches!(app.view, View::Actions(_));
+            title_spans.push(Span::styled("ACTIONS", if active { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) }));
+            
+            title_spans.push(Span::styled(" > ", Style::default().fg(Color::DarkGray)));
+            
+            let active = matches!(app.view, View::Summary(_));
+            title_spans.push(Span::styled("SUMMARY", if active { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) }));
+            
+            title_spans.push(Span::raw(" "));
+        }
     }
 
     let legend = match &app.view {
+        View::Executing(_) => "",
         View::Home(_) => " [Tab] Navigate   [Enter] Select ",
         View::Wizard(_) => " [Tab/Shift+Tab] Navigate   [Enter] Input   [Arrows] Buttons ",
         View::Loading => "",
@@ -867,6 +506,7 @@ pub fn ui(f: &mut Frame, app: &mut App) {
     f.render_widget(block, size);
 
     match &mut app.view {
+        View::Executing(executing) => executing.render(f, inner_area),
         View::Home(home) => {
             home.render(f, inner_area);
         }
@@ -1053,4 +693,315 @@ pub fn ui(f: &mut Frame, app: &mut App) {
             }
         }
     }
+}
+
+
+pub fn start_execution_thread(app: &mut App) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    
+    let config = app.config.clone();
+    let pending_generation = app.pending_generation.clone();
+
+    let init_git = app.pending_actions.as_ref().map(|a| a.init_git).unwrap_or(false);
+    let bootstrap_flux = app.pending_actions.as_ref().map(|a| a.bootstrap_flux).unwrap_or(false);
+    
+    let (git_url_str, initial_branch, path_str, kubeconfig_str, ssh_key_str) = if let Some(a) = &app.pending_actions {
+        if let Some(m) = &a.flux_modal {
+            (
+                m.inputs[0].value().to_string(),
+                m.inputs[1].value().to_string(),
+                m.inputs[2].value().to_string(),
+                m.inputs[3].value().to_string(),
+                m.inputs[4].value().to_string()
+            )
+        } else {
+            ("".to_string(), "main".to_string(), "".to_string(), "".to_string(), "".to_string())
+        }
+    } else {
+        ("".to_string(), "main".to_string(), "".to_string(), "".to_string(), "".to_string())
+    };
+
+    std::thread::spawn(move || {
+        let git_url = &git_url_str;
+        let branch = &initial_branch;
+        let initial_branch = &initial_branch;
+        let path = &path_str;
+        let kubeconfig = &kubeconfig_str;
+        let ssh_key = &ssh_key_str;
+    if let Some((checked_paths, customized_paths)) = pending_generation {
+        let _ = tx.send(crate::executing::ExecutionEvent::Log("\x1b[1;36m[1/3] Generating Output GitOps Directory...\x1b[0m".to_string()));
+        if let Ok(git_mgr) = crate::git::GitManager::new(&config.template_repo_url) {
+            let expanded_gitops_path = if config.gitops_dir_path.starts_with("~/") {
+                if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf())
+                {
+                    home.join(&config.gitops_dir_path[2..])
+                        .to_string_lossy()
+                        .to_string()
+                } else {
+                    config.gitops_dir_path.clone()
+                }
+            } else {
+                config.gitops_dir_path.clone()
+            };
+
+            if let Err(e) = crate::generate::finalize_generation(
+                &git_mgr.repo_dir,
+                &expanded_gitops_path,
+                &config.base_dir_path,
+                &config.new_cluster_name,
+                &checked_paths,
+                &customized_paths,
+            ) {
+                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mError generating: {:?}\x1b[0m", e)));
+            } else {
+                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!(
+                    "\x1b[1;32m✓ Successfully generated GitOps directory at {}\x1b[0m",
+                    expanded_gitops_path
+                )));
+                if true {
+                    if init_git {
+                        let _ = tx.send(crate::executing::ExecutionEvent::Log("\x1b[1;36m[2/3] Initializing Git Repository & Pushing to Remote...\x1b[0m".to_string()));
+                        let target_dir = std::path::Path::new(&expanded_gitops_path);
+
+
+                        if ssh_key.is_empty() {
+                            let _ = tx.send(crate::executing::ExecutionEvent::Log("\x1b[1;31mERROR: Git SSH Key Path is required for pushing to remote and bootstrapping.\x1b[0m".to_string()));
+                            { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
+                        }
+
+                        let init_output = std::process::Command::new("git")
+                            .arg("init")
+                            .arg(format!("--initial-branch={}", initial_branch))
+                            .current_dir(target_dir)
+                            .output();
+                        match init_output {
+                            Ok(out) if !out.status.success() => {
+                                let stderr = String::from_utf8_lossy(&out.stderr);
+                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to initialize git repository:\n{}\x1b[0m", stderr.trim())));
+                                { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
+                            }
+                            Err(e) => {
+                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to execute git init: {}\x1b[0m", e)));
+                                { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
+                            }
+                            _ => {}
+                        }
+
+                        let add_output = std::process::Command::new("git")
+                            .arg("add")
+                            .arg(".")
+                            .current_dir(target_dir)
+                            .output();
+                        match add_output {
+                            Ok(out) if !out.status.success() => {
+                                let stderr = String::from_utf8_lossy(&out.stderr);
+                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to add files to git repository:\n{}\x1b[0m", stderr.trim())));
+                                { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
+                            }
+                            Err(e) => {
+                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to execute git add: {}\x1b[0m", e)));
+                                { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
+                            }
+                            _ => {}
+                        }
+
+                        let commit_output = std::process::Command::new("git")
+                            .arg("commit")
+                            .arg("-m")
+                            .arg("Initial GitOps Commit")
+                            .current_dir(target_dir)
+                            .output();
+                        match commit_output {
+                            Ok(out) if !out.status.success() => {
+                                let stderr = String::from_utf8_lossy(&out.stderr);
+                                let stdout = String::from_utf8_lossy(&out.stdout);
+                                if stdout.contains("nothing to commit") || stderr.contains("nothing to commit") {
+                                    let _ = tx.send(crate::executing::ExecutionEvent::Log("\x1b[1;33mℹ Nothing to commit (working tree clean).\x1b[0m".to_string()));
+                                } else {
+                                    let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to commit to git repository:\n{}\x1b[0m", stderr.trim())));
+                                    { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
+                                }
+                            }
+                            Err(e) => {
+                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to execute git commit: {}\x1b[0m", e)));
+                                { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
+                            }
+                            _ => {}
+                        }
+
+                        let remote_add_output = std::process::Command::new("git")
+                            .arg("remote")
+                            .arg("add")
+                            .arg("origin")
+                            .arg(git_url)
+                            .current_dir(target_dir)
+                            .output();
+                        match remote_add_output {
+                            Ok(out) if !out.status.success() => {
+                                let stderr = String::from_utf8_lossy(&out.stderr);
+                                if stderr.contains("already exists") {
+                                    let _ = tx.send(crate::executing::ExecutionEvent::Log("\x1b[1;33mℹ Remote origin already exists, skipping addition.\x1b[0m".to_string()));
+                                } else {
+                                    let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to add remote to git repository:\n{}\x1b[0m", stderr.trim())));
+                                    { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
+                                }
+                            }
+                            Err(e) => {
+                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to execute git remote add: {}\x1b[0m", e)));
+                                { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
+                            }
+                            _ => {}
+                        }
+
+                        let ssh_env = if !ssh_key.is_empty() {
+                            let expanded_ssh_key = if let Some(stripped) = ssh_key.strip_prefix("~/") {
+                                if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
+                                    home.join(stripped).to_string_lossy().to_string()
+                                } else {
+                                    ssh_key.to_string()
+                                }
+                            } else {
+                                ssh_key.to_string()
+                            };
+                            Some(format!("ssh -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new", expanded_ssh_key))
+                        } else {
+                            None
+                        };
+
+                        // Attempt to pull and rebase before pushing to handle existing repos seamlessly
+                        let mut pull_cmd = std::process::Command::new("git");
+                        pull_cmd
+                            .arg("pull")
+                            .arg("origin")
+                            .arg(initial_branch)
+                            .arg("--rebase")
+                            .arg("--allow-unrelated-histories")
+                            .arg("-X")
+                            .arg("ours")
+                            .current_dir(target_dir);
+
+                        if let Some(ref ssh_cmd) = ssh_env {
+                            pull_cmd.env("GIT_SSH_COMMAND", ssh_cmd);
+                        }
+
+                        // We ignore the result of pull, as it will fail on entirely empty repositories, which is perfectly fine.
+                        let _ = pull_cmd.output();
+
+                        let mut push_cmd = std::process::Command::new("git");
+                        push_cmd.arg("push").arg("-u").arg("origin").arg(initial_branch).current_dir(target_dir);
+
+                        if let Some(ref ssh_cmd) = ssh_env {
+                            push_cmd.env("GIT_SSH_COMMAND", ssh_cmd);
+                        }
+
+                        match push_cmd.output() {
+                            Ok(out) if !out.status.success() => {
+                                let stderr = String::from_utf8_lossy(&out.stderr);
+                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to push to remote repository:\n{}\x1b[0m", stderr.trim())));
+                                { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
+                            }
+                            Err(e) => {
+                                let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to execute git push: {}\x1b[0m", e)));
+                                { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
+                            }
+                            _ => {}
+                        }
+
+                        let _ = tx.send(crate::executing::ExecutionEvent::Log(format!(
+                            "\x1b[1;32m✓ Git initialized and pushed to remote branch '{}'\x1b[0m",
+                            initial_branch
+                        )));
+                    }
+
+                    if bootstrap_flux {
+                        let _ = tx.send(crate::executing::ExecutionEvent::Log("\x1b[1;36m[3/3] Bootstrapping Flux...\x1b[0m".to_string()));
+
+                        if ssh_key.is_empty() {
+                            let _ = tx.send(crate::executing::ExecutionEvent::Log("\x1b[1;31mERROR: Git SSH Key Path is required for bootstrapping.\x1b[0m".to_string()));
+                            { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into())); return; }
+                        }
+
+                        let kubeconfig_arg = if !kubeconfig.is_empty() {
+                            let expanded_kubeconfig = if let Some(stripped) = kubeconfig.strip_prefix("~/") {
+                                if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
+                                    home.join(stripped).to_string_lossy().to_string()
+                                } else {
+                                    kubeconfig.to_string()
+                                }
+                            } else {
+                                kubeconfig.to_string()
+                            };
+                            Some(format!("--kubeconfig={}", expanded_kubeconfig))
+                        } else {
+                            None
+                        };
+
+                        let ssh_key_arg = if !ssh_key.is_empty() {
+                            let expanded_ssh_key = if let Some(stripped) = ssh_key.strip_prefix("~/") {
+                                if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
+                                    home.join(stripped).to_string_lossy().to_string()
+                                } else {
+                                    ssh_key.to_string()
+                                }
+                            } else {
+                                ssh_key.to_string()
+                            };
+                            Some(format!("--private-key-file={}", expanded_ssh_key))
+                        } else {
+                            None
+                        };
+
+                        let run_flux_cmd = |mut cmd: std::process::Command, name: &str| {
+                            match cmd.status() {
+                                Ok(status) => {
+                                    if !status.success() {
+                                        let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: {} failed (exit code {})\x1b[0m", name, status)));
+                                        { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into()));}
+                                    }
+                                }
+                                Err(e) => {
+                                    let _ = tx.send(crate::executing::ExecutionEvent::Log(format!("\x1b[1;31mERROR: Failed to execute {}: {}\x1b[0m", name, e)));
+                                    { let _ = tx.send(crate::executing::ExecutionEvent::Error("Operation failed. Press ESC to go back.".into()));}
+                                }
+                            }
+                        };
+
+                            let mut flux_git_url = git_url.to_string();
+                            if flux_git_url.starts_with("git@") && !flux_git_url.starts_with("ssh://")
+                                && let Some(colon_pos) = flux_git_url.find(':') {
+                                    flux_git_url.replace_range(colon_pos..colon_pos+1, "/");
+                                    flux_git_url.insert_str(0, "ssh://");
+                                }
+
+                            let mut flux_cmd = std::process::Command::new("flux");
+                            flux_cmd
+                                .arg("bootstrap")
+                                .arg("git")
+                                .arg(format!("--url={}", flux_git_url))
+                                .arg(format!("--branch={}", branch))
+                                .arg(format!("--path={}", path));
+
+                            if git_url.starts_with("http://") || git_url.starts_with("https://") {
+                                flux_cmd.arg("--allow-insecure-http=true");
+                            }
+
+                            if let Some(ref arg) = kubeconfig_arg {
+                                flux_cmd.arg(arg);
+                            }
+                            if let Some(ref arg) = ssh_key_arg {
+                                flux_cmd.arg(arg);
+                            }
+
+                            run_flux_cmd(flux_cmd, "flux bootstrap");
+                            let _ = tx.send(crate::executing::ExecutionEvent::Log("\x1b[1;32m✓ Flux bootstrap completed successfully\x1b[0m".to_string()));
+                    }
+                }
+            }
+        }
+    }
+
+        let _ = tx.send(crate::executing::ExecutionEvent::Done);
+    });
+
+    app.view = View::Executing(crate::executing::ExecutingState::new(rx));
 }
