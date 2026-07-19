@@ -129,7 +129,7 @@ pub fn run_app(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
                         let http_port = actions
                             .http_modal
                             .as_ref()
-                            .and_then(|m| m.inputs.get(0))
+                            .and_then(|m| m.inputs.first())
                             .map(|m| m.value())
                             .unwrap_or("8080");
 
@@ -436,6 +436,10 @@ spec:
                                 .arg(format!("--url={}", git_url))
                                 .arg(format!("--branch={}", branch))
                                 .arg(format!("--path={}", path));
+
+                            if git_url.starts_with("http://") {
+                                flux_cmd.arg("--allow-insecure-http=true");
+                            }
 
                             if let Some(ref arg) = kubeconfig_arg {
                                 flux_cmd.arg(arg);
@@ -755,11 +759,10 @@ where
                                             modal.inputs[0].value().to_string();
                                         app.config.git_branch = modal.inputs[1].value().to_string();
                                     }
-                                    if let Some(modal) = &owned_actions.http_modal {
-                                        if let Ok(port) = modal.inputs[0].value().parse::<u16>() {
+                                    if let Some(modal) = &owned_actions.http_modal
+                                        && let Ok(port) = modal.inputs[0].value().parse::<u16>() {
                                             app.config.git_http_server_port = port;
                                         }
-                                    }
                                     let _ = app.config.save();
                                 }
 
