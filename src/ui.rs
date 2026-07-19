@@ -473,6 +473,7 @@ spec:
                                 if actions.git_http_server && !http_username.is_empty() && !http_password.is_empty() {
                                     flux_cmd.arg(format!("--username={}", http_username));
                                     flux_cmd.arg(format!("--password={}", http_password));
+                                    flux_cmd.arg("--token-auth");
                                 }
                             }
 
