@@ -81,8 +81,8 @@ pub fn finalize_generation(
         
         // Read helm-release.yaml to extract namespace
         let hr_path = base_comp_dir.join("helm-release.yaml");
-        if hr_path.exists() {
-            if let Ok(content) = fs::read_to_string(&hr_path) {
+        if hr_path.exists()
+            && let Ok(content) = fs::read_to_string(&hr_path) {
                 for line in content.lines() {
                     let trimmed = line.trim();
                     if trimmed.starts_with("namespace:") {
@@ -96,18 +96,16 @@ pub fn finalize_generation(
                     }
                 }
             }
-        }
         
         // Remove namespace.yaml from base's kustomization.yaml to prevent ID collisions
         let kust_path = base_comp_dir.join("kustomization.yaml");
-        if kust_path.exists() {
-            if let Ok(content) = fs::read_to_string(&kust_path) {
+        if kust_path.exists()
+            && let Ok(content) = fs::read_to_string(&kust_path) {
                 let new_content: Vec<&str> = content.lines()
                     .filter(|l| !l.contains("- namespace.yaml"))
                     .collect();
                 let _ = fs::write(&kust_path, new_content.join("\n") + "\n");
             }
-        }
     }
 
     // Generate cluster-level namespaces explicitly

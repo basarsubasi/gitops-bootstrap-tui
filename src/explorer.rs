@@ -3,6 +3,23 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct Rule {
+    pub component: String,
+    #[serde(default)]
+    pub requires: Vec<String>,
+    #[serde(default)]
+    pub conflicts: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RulesConfig {
+    #[serde(default)]
+    pub rules: Vec<Rule>,
+}
+
 #[derive(Debug, Clone)]
 pub struct TreeItem {
     pub name: String,
@@ -41,11 +58,20 @@ pub struct ExplorerState {
     pub focus: ExplorerFocus,
     pub preview_content: Option<String>,
     pub error_message: Option<String>,
+    pub rules: Vec<Rule>,
 }
 
 impl ExplorerState {
     pub fn new(root_path: PathBuf) -> Self {
         let tree = Self::build_tree(&root_path, &root_path, 0);
+        
+        let mut rules = Vec::new();
+        let rules_path = root_path.join("rules.yaml");
+        if let Ok(content) = fs::read_to_string(&rules_path)
+            && let Ok(config) = serde_yaml::from_str::<RulesConfig>(&content) {
+                rules = config.rules;
+            }
+
         let mut state = Self {
             root_path,
             tree,
@@ -57,6 +83,7 @@ impl ExplorerState {
             focus: ExplorerFocus::Tree,
             preview_content: None,
             error_message: None,
+            rules,
         };
         state.update_flat_list();
         if !state.flat_list.is_empty() {
@@ -319,12 +346,66 @@ impl ExplorerState {
 
     pub fn toggle_current(&mut self) {
         if let Some(idx) = self.list_state.selected()
-            && let Some(item) = self.flat_list.get(idx)
+            && let Some(item) = self.flat_list.get(idx).cloned()
             && item.is_leaf
         {
             if self.checked_paths.contains(&item.path) {
-                self.checked_paths.remove(&item.path);
+                // Check if anything currently checked requires this item
+                let mut required_by = None;
+                for checked in &self.checked_paths {
+                    if let Some(rule) = self.rules.iter().find(|r| r.component == *checked)
+                        && rule.requires.contains(&item.path) {
+                            required_by = Some(checked.clone());
+                            break;
+                        }
+                }
+                
+                if let Some(dependent) = required_by {
+                    self.error_message = Some(format!(
+                        "Cannot uncheck '{}' because '{}' requires it",
+                        item.path, dependent
+                    ));
+                } else {
+                    self.checked_paths.remove(&item.path);
+                }
             } else {
+                // Validate conflicts
+                let mut conflict_found = None;
+                
+                if let Some(rule) = self.rules.iter().find(|r| r.component == item.path) {
+                    for conflict in &rule.conflicts {
+                        if self.checked_paths.contains(conflict) {
+                            conflict_found = Some(conflict.clone());
+                            break;
+                        }
+                    }
+                }
+                
+                if conflict_found.is_none() {
+                    for checked in &self.checked_paths {
+                        if let Some(rule) = self.rules.iter().find(|r| r.component == *checked)
+                            && rule.conflicts.contains(&item.path) {
+                                conflict_found = Some(checked.clone());
+                                break;
+                            }
+                    }
+                }
+                
+                if let Some(conflict) = conflict_found {
+                    self.error_message = Some(format!(
+                        "Cannot select '{}' because it conflicts with '{}'",
+                        item.path, conflict
+                    ));
+                    return;
+                }
+
+                // Apply dependencies
+                if let Some(rule) = self.rules.iter().find(|r| r.component == item.path) {
+                    for req in &rule.requires {
+                        self.checked_paths.insert(req.clone());
+                    }
+                }
+                
                 self.checked_paths.insert(item.path.clone());
             }
         }
